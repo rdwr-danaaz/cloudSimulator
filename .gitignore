@@ -1,0 +1,38 @@
+# --- Secrets / machine-specific config (DO NOT COMMIT) ---
+# Real installer config holds SSH credentials & truststore password.
+# Commit deploy/install_config.example.json instead.
+deploy/install_config.json
+
+# Private TLS key for the self-signed simulator cert.
+# The Docker build regenerates a cert if certs/ is missing.
+certs/server.key
+certs/*.key
+
+# --- Logs ---
+*.log
+ade_log.txt
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# --- Office lock/temp files ---
+~$*.docx
+~$*.doc
+~$*.xlsx
+
+# --- Editor / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,248 @@
+"""Permanent, fixed rule responses keyed by requested network.
+
+For the /api/sdcc/genai/core/analysis/peacetime/_getRecommendation endpoint,
+some networks must always return an exact, pre-defined set of rules.
+Only the top-level "timestamp" and "metadata.interval" are computed dynamically
+by the server; everything here is returned verbatim.
+
+To add a new permanent network response, add another entry to
+PERMANENT_NETWORK_RULES with the network CIDR as the key and the list of
+rule dicts as the value.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
+    "100.98.89.0/24": [
+        {
+            "ruleId": "rule_a16b788c7f285d8c95ad333f6eb07fc3752637cc58c9d4f959c8cd5f9c738983",
+            "sourceIPs": ["5.83.149.1/32"],
+            "destinationIPs": ["100.98.89.100/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": ["1400-1518"],
+            "ttl": ["10", "11", "12", "13"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_40c8a21c18406f19f27560a56aafca9c66fb837780f80202944a53d469d68147",
+            "sourceIPs": ["5.101.86.1/32"],
+            "destinationIPs": ["100.98.89.101/32", "100.98.89.2/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": ["1400-1518"],
+            "ttl": ["255"],
+            "fragment": "none",
+            "sourceGeo": ["CA"],
+            "sourceASN": ["62563"],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_c58a3ae637f18a0c450a9c94a85dd004e198a12d2703ad1a86c6771ea2750318",
+            "sourceIPs": ["5.101.96.1/32"],
+            "destinationIPs": ["100.98.89.102/32", "100.98.89.3/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": ["512-1024"],
+            "ttl": ["128"],
+            "fragment": "none",
+            "sourceGeo": ["NL"],
+            "sourceASN": ["14061"],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_59c6875a08f685c1c0d6a5a0f839b0fdeb04ad77c047d679227b7a0e1f827048",
+            "sourceIPs": [],
+            "destinationIPs": ["100.98.89.0/24"],
+            "sourcePorts": ["1024"],
+            "destinationPorts": ["1024"],
+            "protocol": ["6"],
+            "tcpFlags": [],
+            "packetSize": ["1496", "1500"],
+            "ttl": ["255"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_33ff47ddcdd5e537168d6a450051ea5d49e71502e81fbc1e4a8dd484257651db",
+            "sourceIPs": [],
+            "destinationIPs": ["100.98.89.0/24"],
+            "sourcePorts": ["80"],
+            "destinationPorts": ["1024"],
+            "protocol": ["17"],
+            "tcpFlags": [],
+            "packetSize": ["1496", "1500"],
+            "ttl": ["255"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_3c2b65ae7c4cc3a10bacf42b25de89e7ab4d1a1aa8e32a9c6488b82b45b3980b",
+            "sourceIPs": [],
+            "destinationIPs": ["100.98.89.1/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["1"],
+            "tcpFlags": [],
+            "packetSize": ["512-1024"],
+            "ttl": ["255"],
+            "fragment": "none",
+            "sourceGeo": ["EG"],
+            "sourceASN": ["16509"],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_b12d739cd4270dfe49e7d8af4426e720d086f6794a2bebeb819d6103817780d4",
+            "sourceIPs": ["5.83.149.1/32"],
+            "destinationIPs": ["100.98.89.1/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": ["64-128"],
+            "ttl": ["64"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+    ],
+    "100.98.86.0/24": [
+        {
+            "ruleId": "rule_bdbe6ece1d09197de70fa687feca52da72273d18992f24edc3aef11f4191fe88",
+            "sourceIPs": ["5.83.149.1/32"],
+            "destinationIPs": ["100.98.86.5/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": ["20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "32"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_7a28f3559e4f94d7a28c7eb00a08991c2832abbc320d3ac8fe77dce27aadc999",
+            "sourceIPs": [],
+            "destinationIPs": ["100.98.86.1/32"],
+            "sourcePorts": ["1024-1031"],
+            "destinationPorts": ["80-82"],
+            "protocol": ["6"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": ["64"],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_2671cf8d65fc128c1379512c3cb8fec56f36171c5b86d4b0095ee785e205872a",
+            "sourceIPs": ["5.101.96.1/32"],
+            "destinationIPs": ["100.98.86.7/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": [],
+            "fragment": "none",
+            "sourceGeo": ["NL"],
+            "sourceASN": ["14061"],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_dd8e4dacafb16e36417c51550297602ecc125674d2c725ce6a9108cc922bcf84",
+            "sourceIPs": ["5.101.86.1/32"],
+            "destinationIPs": ["100.98.86.6/32"],
+            "sourcePorts": [],
+            "destinationPorts": [],
+            "protocol": ["2"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": [],
+            "fragment": "none",
+            "sourceGeo": ["CA"],
+            "sourceASN": ["62563"],
+            "action": "allow",
+            "status": "success",
+        },
+    ],
+    "100.98.85.0/24": [
+        {
+            "ruleId": "rule_8885943bb67c9e1459d2fc7c20dd09539f056550c9e076015c95ff66b85dccba",
+            "sourceIPs": [],
+            "destinationIPs": ["100.98.85.0/24"],
+            "sourcePorts": ["8080"],
+            "destinationPorts": ["1024"],
+            "protocol": ["17"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": [],
+            "fragment": "none",
+            "sourceGeo": ["DK", "NZ"],
+            "sourceASN": ["16509"],
+            "action": "allow",
+            "status": "success",
+        },
+        {
+            "ruleId": "rule_f3c5c2c7356840a78abc1711b272d2ebc8d5b43bbdd3df91905c43a2a46b42a2",
+            "sourceIPs": ["5.62.63.30/32"],
+            "destinationIPs": ["100.98.85.4/32"],
+            "sourcePorts": ["8080"],
+            "destinationPorts": ["1024"],
+            "protocol": ["17"],
+            "tcpFlags": [],
+            "packetSize": [],
+            "ttl": [],
+            "fragment": "none",
+            "sourceGeo": [],
+            "sourceASN": [],
+            "action": "allow",
+            "status": "success",
+        },
+    ],
+}
+
+
+def permanent_rules_for(networks: list[str]) -> list[dict[str, Any]] | None:
+    """Return the combined permanent rules for the requested networks.
+
+    If none of the requested networks have a permanent response defined,
+    returns None so the caller can fall back to normal behavior.
+    """
+    collected: list[dict[str, Any]] = []
+    matched = False
+    for net in networks:
+        rules = PERMANENT_NETWORK_RULES.get(net)
+        if rules is not None:
+            matched = True
+            collected.extend(rules)
+    return collected if matched else None
+

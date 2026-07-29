@@ -1,0 +1,26 @@
+{
+  "_comment": "TEMPLATE for the SOC-X simulator installer. Copy this file to 'install_config.json' and fill in your machine-specific values. install_config.json is gitignored so real credentials never get committed. Any value can also be overridden on the command line (see: python install.py --help).",
+
+  "ssh_host": "CHANGE_ME_HOST_OR_IP",
+  "ssh_port": 22,
+  "ssh_user": "root",
+  "ssh_password": "CHANGE_ME_OR_USE_ssh_key_file",
+  "ssh_key_file": null,
+
+  "remote_dir": "/root/socx-sim",
+  "image": "socx-sim:latest",
+  "container": "socx-sim",
+  "host_port": 8088,
+  "internal_port": 8080,
+
+  "ade_container": "",
+  "ade_container_match": "anomaly-detection-engine",
+  "ade_network": "",
+  "ade_properties_path": "",
+  "truststore_password": "changeit",
+
+  "socx_hostname": "",
+  "restart_ade": true,
+  "regenerate_cert": false
+}
+

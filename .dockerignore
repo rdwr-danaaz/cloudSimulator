@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.idea/
+tests/
+write_server.py
+write_tests.py
+*.md
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+

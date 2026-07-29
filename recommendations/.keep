@@ -1,0 +1,4 @@
+# This folder is optionally scanned at startup by cloud_mock_server.py.
+# Drop *.json recommendation files here to pre-pin rules by tag.
+# The core permanent per-network responses live in permanent_responses.py.
+

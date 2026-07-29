@@ -1,0 +1,5 @@
+# Dependencies for the deployment tooling in this folder (NOT the container).
+# Install with:  pip install -r deploy/requirements-deploy.txt
+paramiko>=3.0        # SSH/SFTP used by install.py
+python-docx>=1.1     # only needed to (re)generate INSTALL_GUIDE.docx
+

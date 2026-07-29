@@ -1,0 +1,12 @@
+services:
+  socx-sim:
+    build: .
+    image: socx-sim:latest
+    container_name: socx-sim
+    ports:
+      # host:container  -> change the left side to expose a different host port
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    restart: unless-stopped
+
