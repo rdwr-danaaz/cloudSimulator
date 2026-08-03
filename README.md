@@ -44,6 +44,8 @@ that wires it into ADE automatically.
 | `Dockerfile` / `docker-compose.yml` | Container build & run |
 | `certs/server.crt` | Committed self-signed cert (key is generated/kept locally) |
 | `deploy/install.py` | One-command installer + ADE integration |
+| `deploy/install_standalone.py` | Installs the simulator on its own host (no ADE on it) |
+| `deploy/trust_live_cert_in_ade.py` | Trusts a **remote** simulator's live cert in an ADE truststore |
 | `deploy/install_config.example.json` | Config template (copy to `install_config.json`) |
 | `deploy/generate_install_guide.py` | Generates `INSTALL_GUIDE.docx` |
 
@@ -103,6 +105,44 @@ python deploy/install.py --uninstall       # remove container + revert ADE confi
 python deploy/install.py --config other.json   # target a different machine
 ```
 
+## Standalone deployment (simulator on its own host)
+
+Sometimes the simulator runs on a **separate VM** and one or more ADEs point at
+it across the network (e.g. simulator on `10.205.102.81`, a CC/ADE on
+`10.205.50.10`). Two steps are involved:
+
+1. **Install the simulator on its own host** (installs Docker, clones the repo,
+   generates a cert whose SAN includes the host IP, and runs the container):
+
+   ```bash
+   python deploy/install_standalone.py --host 10.205.102.81 --user socx --password '***' --port 8080
+   ```
+
+   The simulator is then live at
+   `https://<host>:8080/api/sdcc/genai/core/analysis/peacetime/_getRecommendation`.
+
+2. **Point each ADE at it and trust its certificate.** Set the ADE's
+   `socx.*.cloud.hostname` to `<sim-host>:8080`, then import the simulator's
+   self-signed cert into that ADE's Java truststore (otherwise the ADE fails the
+   TLS handshake with `PKIX path building failed`):
+
+   ```bash
+   python deploy/trust_live_cert_in_ade.py \
+       --ade-host 10.205.50.10 --ade-pass '***' \
+       --cloud-host 10.205.102.81 --cloud-port 8080
+   ```
+
+   This auto-detects the ADE container and truststore, fetches the cert the
+   endpoint is **actually serving** (from the ADE host), imports it into the ADE
+   container's `cacerts`, restarts the ADE, and tails the logs to confirm the
+   cloud call succeeds. It also prints the cert's SANs and warns if the dialed
+   IP is missing from them.
+
+   > The trust survives `docker restart` but **not** ADE container recreation
+   > (`docker rm` / `compose up` / upgrades). Re-run the script after recreating
+   > the ADE container. Importing one cert under a unique alias does not disable
+   > TLS validation or affect anything else on the CC.
+
 ## Testing
 
 The repo ships a self-contained test suite that does **not** depend on any
@@ -150,6 +190,10 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
+
+
+
 
 
 
