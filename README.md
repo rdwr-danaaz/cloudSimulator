@@ -8,6 +8,17 @@ returns deterministic, pinned rule sets for specific networks (and generated
 rules otherwise), served over **HTTPS**, and ships with a one-command installer
 that wires it into ADE automatically.
 
+> ### 📘 Which document should I follow to install?
+> - **This `README.md` is the canonical source of truth** — use it if you're
+>   working with the code or the repo. Start at
+>   [Deploy to a new machine running ADE](#deploy-to-a-new-machine-running-ade-step-by-step).
+> - **`INSTALL_GUIDE.docx`** is a polished, shareable Word version of the same
+>   steps, meant for operators/customers who want an offline document to follow
+>   or print. It is **generated from this repo** (see
+>   [Installation guide](#installation-guide)), so it always mirrors these steps.
+>
+> Both describe the same installation; pick the format that suits you.
+
 ## Features
 
 - FastAPI mock of `.../analysis/peacetime/_getRecommendation`
@@ -139,6 +150,7 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
 
 
 
