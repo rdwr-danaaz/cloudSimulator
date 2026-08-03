@@ -1,14 +1,47 @@
+# Keep the Docker build context small and free of secrets / junk.
+# NOTE: certs/ and recommendations/ are intentionally NOT ignored — the build
+# copies them (certs/server.crt is required; a key is generated at build time if
+# certs/server.key is absent).
+
+# --- Python caches ---
 __pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# --- Virtualenvs ---
 .venv/
 venv/
+env/
+
+# --- Editor / OS ---
 .idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Tests & dev-only files ---
 tests/
+requirements-dev.txt
 write_server.py
 write_tests.py
+
+# --- Deploy tooling (not needed inside the runtime image; holds secrets) ---
+deploy/
+
+# --- Docs / guides ---
 *.md
+*.docx
+~$*.docx
+
+# --- Logs ---
+*.log
+ade_log.txt
+
+# --- Version control / CI ---
 .git/
+.github/
 .gitignore
 Dockerfile
 .dockerignore
