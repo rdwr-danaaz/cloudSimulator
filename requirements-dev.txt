@@ -1,0 +1,4 @@
+# Development / CI dependencies (not needed inside the container image).
+pytest==8.3.3
+httpx==0.27.2
+

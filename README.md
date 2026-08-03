@@ -1,5 +1,7 @@
 # SOC-X Recommendation Simulator (cloudSimulator)
 
+[![CI](https://github.com/rdwr-danaaz/cloudSimulator/actions/workflows/ci.yml/badge.svg)](https://github.com/rdwr-danaaz/cloudSimulator/actions/workflows/ci.yml)
+
 A lightweight FastAPI service that simulates the SOC-X cloud
 `_getRecommendation` API used by the **anomaly-detection-engine (ADE)**. It
 returns deterministic, pinned rule sets for specific networks (and generated
@@ -49,14 +51,37 @@ curl -k -X POST https://localhost:8080/api/sdcc/genai/core/analysis/peacetime/_g
   -d '{"tag":"test","networks":["100.98.89.0/24"]}'
 ```
 
-## Deploy to a machine running ADE
+## Deploy to a new machine running ADE (step by step)
 
-```bash
-pip install -r deploy/requirements-deploy.txt
-cp deploy/install_config.example.json deploy/install_config.json
-# edit deploy/install_config.json  -> set ssh_host, ssh_user, ssh_password/ssh_key_file
-python deploy/install.py
-```
+The installer is plug-and-play: point it at a host running the
+anomaly-detection-engine and it does the rest (build, run on ADE's docker
+network, configure ADE, import the TLS cert into ADE's Java truststore, restart
+ADE, and verify end-to-end).
+
+1. **Install the deploy tooling** (on your workstation, not the target):
+
+   ```bash
+   pip install -r deploy/requirements-deploy.txt
+   ```
+
+2. **Create your target config** from the committed template:
+
+   ```bash
+   cp deploy/install_config.example.json deploy/install_config.json
+   ```
+
+3. **Edit `deploy/install_config.json`** — set at least:
+   - `ssh_host` — the ADE machine's IP/hostname
+   - `ssh_user` and `ssh_password` (or `ssh_key_file`)
+   - leave auto-detected fields blank to let the installer discover them
+
+   > This file is **gitignored** because it holds credentials — never commit it.
+
+4. **Run the installer:**
+
+   ```bash
+   python deploy/install.py
+   ```
 
 Useful modes:
 
@@ -64,7 +89,30 @@ Useful modes:
 python deploy/install.py --verify-only     # re-run verification checks
 python deploy/install.py --no-restart-ade  # skip ADE restart
 python deploy/install.py --uninstall       # remove container + revert ADE config
+python deploy/install.py --config other.json   # target a different machine
 ```
+
+## Testing
+
+The repo ships a self-contained test suite that does **not** depend on any
+machine-specific data in `recommendations/`, so it runs on a fresh clone:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest tests/test_ci.py -q
+```
+
+## Continuous integration
+
+Every push / PR to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+which has two jobs:
+
+- **test** — installs deps and runs `pytest tests/test_ci.py`
+- **docker-build** — builds the image and smoke-tests `GET /health` over HTTPS
+  inside the container
+
+The build generates a self-signed cert automatically when `certs/server.key`
+is absent (as on a fresh checkout), so CI works without any secrets.
 
 ## Adding a new pinned network
 
@@ -87,4 +135,11 @@ A full step-by-step Word guide is generated at `INSTALL_GUIDE.docx`:
 ```bash
 python deploy/generate_install_guide.py
 ```
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+
+
 

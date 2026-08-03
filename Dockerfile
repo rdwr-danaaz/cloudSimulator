@@ -22,7 +22,20 @@ COPY recommendations/ ./recommendations/
 # validates the cert against its Java truststore, so the cert must NOT change on
 # every build (otherwise the truststore import would need redoing each time).
 # SAN covers the docker service name and the host IP used in staging configs.
+#
+# The private key (certs/server.key) is gitignored, so on a fresh clone / CI it
+# may be absent. In that case we generate a self-signed cert at build time so the
+# image still runs. Real deployments use a per-target cert produced by
+# deploy/install.py, which is imported into ADE's truststore.
 COPY certs/ ./certs/
+RUN if [ ! -f /app/certs/server.key ]; then \
+        apt-get update && apt-get install -y --no-install-recommends openssl && \
+        rm -rf /var/lib/apt/lists/* && \
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout /app/certs/server.key -out /app/certs/server.crt \
+            -subj "/CN=socx-sim" \
+            -addext "subjectAltName=DNS:socx-sim,DNS:localhost,IP:127.0.0.1"; \
+    fi
 
 EXPOSE 8080
 

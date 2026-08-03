@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests/test_ci.py -q
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: cloudsimulator:ci
+
+      - name: Smoke-test the container over HTTPS
+        run: |
+          docker run -d --name socx-sim-ci -p 8080:8080 cloudsimulator:ci
+          for i in $(seq 1 20); do
+            if curl -ks https://localhost:8080/health | grep -q '"status":"ok"'; then
+              echo "health OK"; break
+            fi
+            sleep 2
+          done
+          curl -ks https://localhost:8080/health | grep -q '"status":"ok"'
+          docker rm -f socx-sim-ci
+
