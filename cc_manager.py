@@ -319,18 +319,36 @@ def reset_cc(
             emit("WARNING: ade.config.properties not found; skipping config revert.")
         else:
             orig_backup = known.get("orig_backup") or f"{props}.socxsim-orig"
-            has_backup = run(f"test -f {orig_backup} && echo yes || echo no", echo=False)[1].strip()
-            if has_backup == "yes":
+            sim = (known.get("sim_hostport") or "").strip()
+            if run(f"test -f {orig_backup} && echo yes || echo no", echo=False)[1].strip() == "yes":
                 run(f"cp -p {orig_backup} {props}")
-                emit(f"Restored original ADE config from {orig_backup}")
-            else:
-                # No pristine backup: remove the two keys we would have set.
-                for key in ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname"):
+                emit(f"Restored ADE config from backup {orig_backup}")
+            # Always ensure the simulator hostname is gone. The backup may itself
+            # already point at the simulator (e.g. the CC was configured before
+            # the UI captured a backup), so restoring alone isn't enough.
+            keys = ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname")
+            for key in keys:
+                key_pat = key.replace(".", r"\.")
+                if sim:
+                    sim_pat = sim.replace(".", r"\.")
+                    # Delete only lines for this key that point at the simulator.
                     run(
-                        f"sed -i -E '/^[[:space:]]*{key}[[:space:]]*=/d' {props}",
+                        f"sed -i -E '\\|^[[:space:]]*{key_pat}[[:space:]]*=[[:space:]]*"
+                        f"{sim_pat}[[:space:]]*$|d' {props}",
                         echo=False,
                     )
-                emit("No pristine backup found; removed socx.*.cloud.hostname keys.")
+                else:
+                    # Unknown sim address: remove the key entirely (we manage it).
+                    run(
+                        f"sed -i -E '/^[[:space:]]*{key_pat}[[:space:]]*=/d' {props}",
+                        echo=False,
+                    )
+            remaining = run(
+                f"grep -nE 'socx\\.(positive|remediation)\\.cloud\\.hostname' {props} "
+                f"|| echo '(no simulator hostname remaining)'",
+                echo=False,
+            )[1].strip()
+            emit(f"Simulator cloud hostname removed from ADE config. Current: {remaining}")
 
         # 2. Remove the imported simulator cert from the ADE truststore
         ade = known.get("ade_container") or run(
@@ -381,6 +399,7 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
 
 
 
