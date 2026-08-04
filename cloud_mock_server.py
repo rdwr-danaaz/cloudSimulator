@@ -267,6 +267,9 @@ def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
                         continue
                     if v not in (None, "", []):
                         rule[k] = v
+                # ADE requires non-null fragment/action (see response_template).
+                rule.setdefault("fragment", "none")
+                rule.setdefault("action", "allow")
                 rule["status"] = "success"
                 out.append(rule)
         rules = out

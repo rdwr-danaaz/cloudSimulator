@@ -163,9 +163,12 @@ def test_template_dst_always_matches_request():
         assert rule["destinationIPs"] == ["203.0.113.0/24"]
         assert rule["protocol"] == ["6"]
         assert rule["ttl"] == ["64"]
-        # optional fields not provided must be absent (not mandatory)
+        # optional list fields not provided must be absent (not mandatory)
         assert "sourceGeo" not in rule
         assert "packetSize" not in rule
+        # ADE requires non-null fragment/action, so they always get safe defaults
+        assert rule["fragment"] == "none"
+        assert rule["action"] == "allow"
         assert rule["status"] == "success"
     finally:
         _disable_template()
@@ -250,6 +253,7 @@ def test_configure_without_address_uses_host_header():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
+
 
 
 

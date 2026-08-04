@@ -132,7 +132,13 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
             for field in _OPTIONAL_FIELDS:
                 if field in rt and rt[field] not in (None, "", []):
                     rule[field] = rt[field]
+            # ADE requires these scalar fields to be non-null (its DTO mapper
+            # calls fragment.equalsIgnoreCase(...)), so always provide a safe
+            # default even when the user left them blank.
+            rule.setdefault("fragment", "none")
+            rule.setdefault("action", "allow")
             rule["status"] = "success"
             out.append(rule)
     return out
+
 

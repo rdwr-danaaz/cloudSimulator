@@ -147,7 +147,7 @@ th{color:#1a3c5e}
 
       <label style="margin-top:18px">Template rules (JSON) &mdash; edit directly if you prefer</label>
       <textarea id="tpl_json" rows="12"></textarea>
-      <p class="hint"><code>destinationIPs</code> is ignored/overwritten per request. A JSON array of rule objects.</p>
+      <p class="hint"><code>destinationIPs</code> is ignored/overwritten per request. A JSON array of rule objects. Blank <code>fragment</code>/<code>action</code> default to <code>none</code>/<code>allow</code> (ADE rejects null values).</p>
       <button onclick="saveTemplate()" title="Persist the template and activate it for all Cyber Controllers">&#128190; Save template</button>
     </div>
 
@@ -301,6 +301,7 @@ setInterval(loadStatus,15000);
 </script>
 </body>
 </html>
+
 
 
 
