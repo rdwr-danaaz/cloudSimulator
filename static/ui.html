@@ -47,6 +47,7 @@ th{color:#1a3c5e}
 .pill{display:inline-block;background:#e8f5e9;color:#256029;border-radius:10px;padding:2px 10px;font-size:.74rem}
 .badge{display:inline-block;border-radius:12px;padding:3px 12px;font-size:.78rem;font-weight:bold}
 .badge.on{background:#e8f5e9;color:#256029}.badge.off{background:#fdeaea;color:#a5342a}
+.badge.info{background:#eaf3ff;color:#20456b}
 .toast{position:fixed;bottom:24px;right:24px;color:#fff;padding:12px 24px;border-radius:8px;display:none;font-size:.9rem;box-shadow:0 6px 16px rgba(0,0,0,.25);z-index:9}
 .switch{display:flex;align-items:center;gap:8px;margin-top:12px}.switch input{width:auto}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -183,10 +184,10 @@ th{color:#1a3c5e}
         <button class="sec small" style="float:right" onclick="loadRecs()" title="Reload the list of existing recommendations">&#128260; Refresh</button>
       </h2>
       <p class="sub">
-        Browse existing rule sets (pinned per-network responses and seeded tags).
-        Use <b>View JSON</b> to inspect a set, or <b>Copy to Template</b> to load it
-        into the Template tab as a starting point (the destination is re-matched to
-        each request automatically).
+        Browse existing rule sets: your current <b>Template</b> (Tab 2), the pinned
+        per-network responses, and any seeded tags. Use <b>View JSON</b> to inspect
+        a set, or <b>Copy to Template</b> to load it into the Template tab as a
+        starting point (the destination is re-matched to each request automatically).
       </p>
       <div id="rec_list">Loading&hellip;</div>
     </div>
@@ -355,8 +356,8 @@ async function loadRecs(){
     REC_GROUPS=d.groups||[];
     if(!REC_GROUPS.length){el.innerHTML='<span style="color:#888">No recommendations available. Pinned networks live in permanent_responses.py; seeded tags come from the recommendations/ folder.</span>';return;}
     el.innerHTML=REC_GROUPS.map((g,idx)=>{
-      const kindOn = g.kind==="permanent";
-      const badge = `<span class="badge ${kindOn?'on':'off'}">${g.kind}</span>`;
+      const cls = g.kind==="permanent" ? "on" : (g.kind==="template" ? "info" : "off");
+      const badge = `<span class="badge ${cls}">${g.kind}</span>`;
       const rows = g.rules.map((r,i)=>`<tr>
         <td>${i+1}</td>
         <td>${fmt(r.protocol)}</td>
@@ -411,6 +412,9 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
+
+
 
 
 

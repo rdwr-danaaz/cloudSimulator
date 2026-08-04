@@ -281,9 +281,20 @@ def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
 def list_recommendations() -> dict[str, Any]:
     """Return all existing rule sets so users can browse and reuse them.
 
+    - 'template':  the current editable template (Tab 2), if it has rules
     - 'permanent': pinned per-network responses (permanent_responses.py)
     - 'seeded':    tag-based rule sets loaded from recommendations/ or /admin/seed
     """
+    tpl = response_template.get_template()
+    template_group = []
+    if tpl.get("rules"):
+        state = "active" if tpl.get("enabled") else "inactive"
+        template_group = [{
+            "kind": "template",
+            "key": f"Template (current \u2014 {state})",
+            "count": len(tpl["rules"]),
+            "rules": tpl["rules"],
+        }]
     permanent = [
         {"kind": "permanent", "key": net, "count": len(rules), "rules": rules}
         for net, rules in PERMANENT_NETWORK_RULES.items()
@@ -293,7 +304,7 @@ def list_recommendations() -> dict[str, Any]:
          "rules": [_normalize(r) for r in rules]}
         for tag, rules in rules_store.items()
     ]
-    return {"groups": permanent + seeded}
+    return {"groups": template_group + permanent + seeded}
 
 
 # --- Tab 1: Cyber Controller configuration ----------------------------------
