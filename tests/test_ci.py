@@ -244,6 +244,25 @@ def test_siminfo_reports_address_and_version():
     assert "suggested_sim_hostport" in d
 
 
+def test_recommendations_lists_permanent_networks():
+    d = client.get("/ui/recommendations").json()
+    keys = {g["key"] for g in d["groups"] if g["kind"] == "permanent"}
+    assert set(PERMANENT_NETWORK_RULES).issubset(keys)
+    # each group carries its rules and a matching count
+    for g in d["groups"]:
+        assert g["count"] == len(g["rules"])
+
+
+def test_recommendations_includes_seeded_tags():
+    client.post("/admin/seed", json={
+        "tag": "browse-me",
+        "rules": [{"ruleId": "rule_x", "destinationIPs": ["9.9.9.0/24"]}]})
+    d = client.get("/ui/recommendations").json()
+    seeded = {g["key"]: g for g in d["groups"] if g["kind"] == "seeded"}
+    assert "browse-me" in seeded
+    assert seeded["browse-me"]["rules"][0]["ruleId"] == "rule_x"
+
+
 def test_configure_without_address_uses_host_header():
     # No sim_hostport supplied; server should derive it and still attempt SSH,
     # failing gracefully (ok False) rather than 400 for a missing address.
@@ -253,6 +272,7 @@ def test_configure_without_address_uses_host_header():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
+
 
 
 

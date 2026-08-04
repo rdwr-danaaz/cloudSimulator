@@ -95,9 +95,14 @@ restarts ADE, forgets the CC) and a **Remove** that only drops it from the list.
 **Tab 2 — Recommendation.** Edit the JSON returned for any request that isn't a
 pinned network, with an *active/inactive* badge. `destinationIPs` is always
 overwritten with the requesting network, so the destination always matches the
-request. All other fields (TTL, protocol, ports, packet size, geo, ASN, fragment,
-action) are optional. Use **Preview** to see the exact response a CC would
-receive. State is persisted under `data/` (mounted as a docker volume).
+request. All other fields are optional, but blank `fragment`/`action` default to
+`none`/`allow` (ADE rejects null values). Use **Preview** to see the exact
+response a CC would receive. State is persisted under `data/` (docker volume).
+
+**Tab 3 — Recommendations.** Browse every existing rule set — the pinned
+per-network responses and any seeded tags — in a friendly table. **View JSON**
+opens a full JSON viewer (with copy), and **Copy to Template** loads a set into
+Tab 2 as a starting point (the destination is re-matched per request).
 
 ## Deploy to a new machine running ADE (step by step)
 
@@ -225,6 +230,7 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
 
 
 

@@ -50,6 +50,18 @@ th{color:#1a3c5e}
 .toast{position:fixed;bottom:24px;right:24px;color:#fff;padding:12px 24px;border-radius:8px;display:none;font-size:.9rem;box-shadow:0 6px 16px rgba(0,0,0,.25);z-index:9}
 .switch{display:flex;align-items:center;gap:8px;margin-top:12px}.switch input{width:auto}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.recgroup{border:1px solid #e6eaf0;border-radius:8px;margin-bottom:14px;overflow:hidden}
+.rechead{background:#f6f8fb;padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rechead b{font-family:Consolas,monospace}
+.rechead .spacer{flex:1}
+.recbody{overflow-x:auto}
+.recbody table{margin:0}
+.recbody td,.recbody th{font-size:.8rem;white-space:nowrap}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;align-items:center;justify-content:center;padding:20px}
+.modal.show{display:flex}
+.modalbox{background:#fff;border-radius:10px;max-width:760px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.modalhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.modalbox pre{background:#0d1b2a;color:#c8e1ff;padding:14px;border-radius:8px;font-size:.8rem;overflow:auto;flex:1;white-space:pre-wrap}
 @media(max-width:820px){.layout{flex-direction:column}nav{width:100%;display:flex;padding:0}nav .navbtn{flex:1;justify-content:center;border-left:none;border-bottom:4px solid transparent}nav .navbtn.active{border-left:none;border-bottom-color:#4da3ff}.grid2{grid-template-columns:1fr}}
 </style>
 </head>
@@ -69,7 +81,10 @@ th{color:#1a3c5e}
       <span class="ic">&#128225;</span><span>Cyber Controller<small>Connect &amp; manage CCs</small></span>
     </div>
     <div class="navbtn" data-tab="tpl" onclick="switchTab('tpl')">
-      <span class="ic">&#128221;</span><span>Recommendation<small>Edit the response</small></span>
+      <span class="ic">&#128221;</span><span>Template<small>Edit the response</small></span>
+    </div>
+    <div class="navbtn" data-tab="rec" onclick="switchTab('rec')">
+      <span class="ic">&#128218;</span><span>Recommendations<small>Browse &amp; copy</small></span>
     </div>
   </nav>
 
@@ -161,7 +176,38 @@ th{color:#1a3c5e}
     </div>
   </section>
 
+  <!-- ============ TAB 3: RECOMMENDATIONS ============ -->
+  <section class="panel" id="panel-rec">
+    <div class="card">
+      <h2>&#128218; Available recommendations
+        <button class="sec small" style="float:right" onclick="loadRecs()" title="Reload the list of existing recommendations">&#128260; Refresh</button>
+      </h2>
+      <p class="sub">
+        Browse existing rule sets (pinned per-network responses and seeded tags).
+        Use <b>View JSON</b> to inspect a set, or <b>Copy to Template</b> to load it
+        into the Template tab as a starting point (the destination is re-matched to
+        each request automatically).
+      </p>
+      <div id="rec_list">Loading&hellip;</div>
+    </div>
+  </section>
+
   </main>
+</div>
+
+<!-- JSON viewer modal -->
+<div class="modal" id="jsonmodal">
+  <div class="modalbox">
+    <div class="modalhead">
+      <b id="json_title">JSON</b>
+      <button class="copy" style="color:#333;font-size:1.1rem" onclick="closeModal()" title="Close">&#10005;</button>
+    </div>
+    <pre id="json_body"></pre>
+    <div>
+      <button class="sec" onclick="copyJsonBody()" title="Copy this JSON to the clipboard">&#128203; Copy JSON</button>
+      <button onclick="copyModalToTemplate()" title="Load these rules into the Template tab">&#8631; Copy to Template</button>
+    </div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -173,6 +219,8 @@ function switchTab(name){
   document.querySelectorAll(".navbtn").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
   document.getElementById("panel-cc").classList.toggle("active",name==="cc");
   document.getElementById("panel-tpl").classList.toggle("active",name==="tpl");
+  document.getElementById("panel-rec").classList.toggle("active",name==="rec");
+  if(name==="rec")loadRecs();
 }
 function copyAddr(){navigator.clipboard.writeText(SIM_ADDR).then(()=>toast("Endpoint copied"));}
 async function readJson(r){const t=await r.text();try{return JSON.parse(t);}catch(e){return {ok:false,log:[(t||("HTTP "+r.status)).slice(0,400)]};}}
@@ -295,12 +343,80 @@ async function previewTemplate(){
   const out=document.getElementById("pv_out");out.style.display="block";out.textContent=JSON.stringify(d.rules,null,2);
 }
 
+/* ---------- Tab 3: browse recommendations ---------- */
+let REC_GROUPS = [];
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+const fmt = v => (Array.isArray(v)?(v.length?v.join(", "):"\u2014"):(v==null||v===""?"\u2014":v));
+async function loadRecs(){
+  const el=document.getElementById("rec_list");
+  el.textContent="Loading\u2026";
+  try{
+    const d=await(await fetch("/ui/recommendations")).json();
+    REC_GROUPS=d.groups||[];
+    if(!REC_GROUPS.length){el.innerHTML='<span style="color:#888">No recommendations available. Pinned networks live in permanent_responses.py; seeded tags come from the recommendations/ folder.</span>';return;}
+    el.innerHTML=REC_GROUPS.map((g,idx)=>{
+      const kindOn = g.kind==="permanent";
+      const badge = `<span class="badge ${kindOn?'on':'off'}">${g.kind}</span>`;
+      const rows = g.rules.map((r,i)=>`<tr>
+        <td>${i+1}</td>
+        <td>${fmt(r.protocol)}</td>
+        <td>${escapeHtml(fmt(r.sourceIPs))}</td>
+        <td>${escapeHtml(fmt(r.destinationIPs))}</td>
+        <td>${fmt(r.sourcePorts)}</td>
+        <td>${fmt(r.destinationPorts)}</td>
+        <td>${fmt(r.ttl)}</td>
+        <td>${fmt(r.fragment)}</td>
+        <td>${fmt(r.action)}</td></tr>`).join("");
+      return `<div class="recgroup">
+        <div class="rechead">${badge} <b>${escapeHtml(g.key)}</b>
+          <span style="opacity:.65">(${g.count} rule${g.count===1?'':'s'})</span>
+          <span class="spacer"></span>
+          <button class="sec small" onclick="viewGroupJson(${idx})" title="Inspect the full JSON for this set">&#128269; View JSON</button>
+          <button class="small" onclick="copyGroupToTemplate(${idx})" title="Load these rules into the Template tab">&#8631; Copy to Template</button>
+        </div>
+        <div class="recbody"><table>
+          <tr><th>#</th><th>Protocol</th><th>Source IPs</th><th>Destination IPs</th><th>SPorts</th><th>DPorts</th><th>TTL</th><th>Fragment</th><th>Action</th></tr>
+          ${rows}
+        </table></div>
+      </div>`;
+    }).join("");
+  }catch(e){el.textContent="Could not load recommendations.";}
+}
+function copyGroupToTemplate(idx){
+  const g=REC_GROUPS[idx];if(!g)return;
+  document.getElementById("tpl_json").value=JSON.stringify(g.rules,null,2);
+  switchTab("tpl");
+  toast(`Loaded ${g.count} rule(s) from ${g.key} into Template \u2014 review & Save`);
+}
+/* JSON modal */
+let MODAL_RULES=null;
+function viewGroupJson(idx){
+  const g=REC_GROUPS[idx];if(!g)return;
+  MODAL_RULES=g.rules;
+  document.getElementById("json_title").textContent=`${g.kind}: ${g.key} (${g.count} rules)`;
+  document.getElementById("json_body").textContent=JSON.stringify(g.rules,null,2);
+  document.getElementById("jsonmodal").classList.add("show");
+}
+function closeModal(){document.getElementById("jsonmodal").classList.remove("show");}
+function copyJsonBody(){navigator.clipboard.writeText(document.getElementById("json_body").textContent).then(()=>toast("JSON copied"));}
+function copyModalToTemplate(){
+  if(!MODAL_RULES)return;
+  document.getElementById("tpl_json").value=JSON.stringify(MODAL_RULES,null,2);
+  closeModal();switchTab("tpl");toast("Loaded into Template \u2014 review & Save");
+}
+document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id==="jsonmodal")closeModal();});
+
 /* init */
 loadStatus();loadCCs();loadTemplate();
-setInterval(loadStatus,15000);
-</script>
+setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
+
+
+
+
+
 
 
 

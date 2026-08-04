@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
-from permanent_responses import permanent_rules_for
+from permanent_responses import permanent_rules_for, PERMANENT_NETWORK_RULES
 import response_template
 import cc_manager
 
@@ -239,8 +239,6 @@ def siminfo(request: Request) -> dict[str, Any]:
 @app.get("/ui/template")
 def get_template() -> dict[str, Any]:
     return response_template.get_template()
-
-
 @app.post("/ui/template")
 def set_template(body: TemplateRequest) -> dict[str, Any]:
     try:
@@ -276,6 +274,26 @@ def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
     else:
         rules = response_template.build_rules(networks)
     return {"networks": networks, "rules": rules}
+
+
+# --- Tab 3: browse existing recommendations ---------------------------------
+@app.get("/ui/recommendations")
+def list_recommendations() -> dict[str, Any]:
+    """Return all existing rule sets so users can browse and reuse them.
+
+    - 'permanent': pinned per-network responses (permanent_responses.py)
+    - 'seeded':    tag-based rule sets loaded from recommendations/ or /admin/seed
+    """
+    permanent = [
+        {"kind": "permanent", "key": net, "count": len(rules), "rules": rules}
+        for net, rules in PERMANENT_NETWORK_RULES.items()
+    ]
+    seeded = [
+        {"kind": "seeded", "key": tag, "count": len(rules),
+         "rules": [_normalize(r) for r in rules]}
+        for tag, rules in rules_store.items()
+    ]
+    return {"groups": permanent + seeded}
 
 
 # --- Tab 1: Cyber Controller configuration ----------------------------------
