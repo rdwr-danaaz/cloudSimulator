@@ -39,6 +39,9 @@ deploy/
 *.log
 ade_log.txt
 
+# --- Runtime UI state (created at runtime, mounted as a volume) ---
+data/
+
 # --- Version control / CI ---
 .git/
 .github/

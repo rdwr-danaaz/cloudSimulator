@@ -26,6 +26,14 @@ that wires it into ADE automatically.
 - HTTPS with a self-signed cert (SANs for the docker service name + host)
 - Pinned, per-network responses in `permanent_responses.py`
 - Dynamic `timestamp` and `metadata.interval` on every response
+- **Web UI at `/ui`** with two tabs:
+  - **Cyber Controller Setup** — point a CC's ADE at this simulator over SSH
+    (sets `socx.*.cloud.hostname`, imports the TLS cert, restarts ADE) and lists
+    every connected CC. Multiple CCs can use one simulator simultaneously.
+  - **Recommendation Template** — edit the JSON returned for non-pinned
+    requests. The **destination network always matches the incoming request**;
+    every other field (TTL, protocol, ports, geo, ASN…) is optional. Includes a
+    live preview.
 - **Plug-and-play installer** (`deploy/install.py`) that:
   - auto-detects the ADE container, its docker network, truststore and
     `ade.config.properties`
@@ -39,7 +47,10 @@ that wires it into ADE automatically.
 | Path | Purpose |
 |------|---------|
 | `main.py` | ASGI entrypoint; mounts the mock app at `/` and `/socx_sim/` |
-| `cloud_mock_server.py` | FastAPI app implementing `_getRecommendation` |
+| `cloud_mock_server.py` | FastAPI app implementing `_getRecommendation` + UI/API |
+| `response_template.py` | Global, editable recommendation template (dst = request net) |
+| `cc_manager.py` | Configures Cyber Controllers over SSH + keeps a CC registry |
+| `static/ui.html` | Two-tab web UI served at `/ui` |
 | `permanent_responses.py` | Pinned per-network rule responses |
 | `Dockerfile` / `docker-compose.yml` | Container build & run |
 | `certs/server.crt` | Committed self-signed cert (key is generated/kept locally) |
@@ -63,6 +74,25 @@ curl -k -X POST https://localhost:8080/api/sdcc/genai/core/analysis/peacetime/_g
   -H "Content-Type: application/json" \
   -d '{"tag":"test","networks":["100.98.89.0/24"]}'
 ```
+
+## Web UI (`/ui`)
+
+Open `https://<sim-host>:8080/ui` in a browser (accept the self-signed cert).
+
+**Tab 1 — Cyber Controller Setup.** Enter a CC's host + SSH credentials and the
+address the CC should call this simulator at (`host:port`). The simulator SSHes
+into the CC, sets `socx.positive.cloud.hostname` / `socx.remediation.cloud.hostname`,
+imports the simulator's TLS cert into the ADE Java truststore, and restarts ADE.
+Every configured CC is listed in the table; because the response is built
+per-request, many CCs can share one simulator at the same time.
+
+**Tab 2 — Recommendation Template.** Edit the JSON returned for any request that
+isn't a pinned network. `destinationIPs` is always overwritten with the
+requesting network, so the destination always matches the request. All other
+fields (TTL, protocol, ports, packet size, geo, ASN, fragment, action) are
+optional — omit any you don't need. Use **Preview** to see the exact response a
+CC would receive for a given network. State is persisted under `data/` (mounted
+as a docker volume).
 
 ## Deploy to a new machine running ADE (step by step)
 
@@ -190,6 +220,9 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
+
+
 
 
 

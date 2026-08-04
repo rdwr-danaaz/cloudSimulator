@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SOC-X Simulator</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f0f2f5;color:#222}
+header{background:#1a3c5e;color:#fff;padding:16px 32px}
+header h1{margin:0;font-size:1.4rem}
+header p{margin:4px 0 0;font-size:.85rem;opacity:.85}
+.tabs{display:flex;background:#12293f;padding:0 32px}
+.tab{padding:14px 22px;color:#cdd9e6;cursor:pointer;font-size:.95rem;border-bottom:3px solid transparent}
+.tab:hover{color:#fff}
+.tab.active{color:#fff;border-bottom-color:#4da3ff;background:#1a3c5e}
+main{max-width:1000px;margin:24px auto;padding:0 16px 48px}
+.panel{display:none}.panel.active{display:block}
+.card{background:#fff;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.1);padding:24px;margin-bottom:24px}
+.card h2{margin:0 0 6px;font-size:1.1rem;color:#1a3c5e}
+.card .sub{font-size:.85rem;color:#555;margin:0 0 16px}
+label{display:block;font-size:.82rem;font-weight:bold;margin:10px 0 4px}
+input,textarea,select{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:.9rem}
+textarea{font-family:Consolas,monospace;font-size:.82rem}
+.row{display:flex;gap:16px;flex-wrap:wrap}.row .f{flex:1;min-width:170px}
+button{background:#1a3c5e;color:#fff;border:none;padding:10px 20px;border-radius:4px;cursor:pointer;font-size:.9rem;margin-top:14px}
+button:hover{background:#245080}
+button.sec{background:#e0e6f0;color:#1a3c5e}button.sec:hover{background:#d0dbea}
+button.danger{background:#c0392b}button.danger:hover{background:#a5342a}
+.hint{font-size:.78rem;color:#888;margin:4px 0 0}
+pre.log{background:#0d1b2a;color:#c8e1ff;padding:14px;border-radius:6px;font-size:.78rem;max-height:320px;overflow:auto;white-space:pre-wrap}
+table{width:100%;border-collapse:collapse;margin-top:12px;font-size:.85rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee}
+th{color:#1a3c5e}
+.pill{display:inline-block;background:#e8f5e9;color:#256029;border-radius:10px;padding:2px 10px;font-size:.75rem}
+.toast{position:fixed;bottom:24px;right:24px;color:#fff;padding:12px 24px;border-radius:6px;display:none;font-size:.9rem;box-shadow:0 4px 12px rgba(0,0,0,.25);z-index:9}
+.switch{display:flex;align-items:center;gap:8px;margin-top:10px}
+.switch input{width:auto}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>&#128737; SOC-X Recommendation Simulator</h1>
+  <p>Configure Cyber Controllers and the recommendation response. Multiple CCs can use this simulator at the same time.</p>
+</header>
+<div class="tabs">
+  <div class="tab active" data-tab="cc" onclick="switchTab('cc')">1 &middot; Cyber Controller Setup</div>
+  <div class="tab" data-tab="tpl" onclick="switchTab('tpl')">2 &middot; Recommendation Template</div>
+</div>
+<main>
+
+<!-- ================= TAB 1: CC SETUP ================= -->
+<section class="panel active" id="panel-cc">
+  <div class="card">
+    <h2>&#128225; Connect a Cyber Controller to this simulator</h2>
+    <p class="sub">Points the CC's ADE at this simulator, trusts its TLS certificate, and restarts the ADE. Runs over SSH to the CC.</p>
+    <div class="row">
+      <div class="f">
+        <label>Cyber Controller host / IP</label>
+        <input id="cc_host" placeholder="10.205.50.10">
+      </div>
+      <div class="f" style="max-width:120px">
+        <label>SSH port</label>
+        <input id="cc_port" value="22">
+      </div>
+    </div>
+    <div class="row">
+      <div class="f"><label>SSH user</label><input id="cc_user" value="root"></div>
+      <div class="f"><label>SSH password</label><input id="cc_pass" type="password" placeholder="&bull;&bull;&bull;&bull;&bull;"></div>
+    </div>
+    <label>Simulator address the CC should call (host:port)</label>
+    <input id="cc_sim" placeholder="10.205.102.81:8080">
+    <p class="hint">This is where the CC's ADE will send <code>_getRecommendation</code>. Use an address reachable from the CC.</p>
+    <div class="switch"><input type="checkbox" id="cc_restart" checked><label style="margin:0">Restart ADE after configuring</label></div>
+    <button onclick="configureCC()">&#9889; Configure Cyber Controller</button>
+    <button class="sec" onclick="loadCCs()">&#128260; Refresh list</button>
+    <div id="cc_logwrap" style="display:none"><label>Result</label><pre class="log" id="cc_log"></pre></div>
+  </div>
+
+  <div class="card">
+    <h2>&#128203; Connected Cyber Controllers</h2>
+    <p class="sub">All controllers currently pointed at this simulator.</p>
+    <div id="cc_table">Loading&hellip;</div>
+  </div>
+</section>
+
+<!-- ================= TAB 2: TEMPLATE ================= -->
+<section class="panel" id="panel-tpl">
+  <div class="card">
+    <h2>&#128221; Recommendation template</h2>
+    <p class="sub">
+      Returned for any request that isn't a pinned network. The
+      <b>destination network is always set to the incoming request's network</b> &mdash;
+      every other field (TTL, protocol, ports, geo, ASN&hellip;) is optional.
+    </p>
+    <div class="switch">
+      <input type="checkbox" id="tpl_enabled">
+      <label style="margin:0">Use this template for responses (when off, built-in auto-generation is used)</label>
+    </div>
+
+    <label>Add a rule (all fields optional)</label>
+    <div class="grid2">
+      <div><label style="font-weight:normal">Protocol (csv)</label><input id="r_proto" placeholder="6,17"></div>
+      <div><label style="font-weight:normal">TTL (csv)</label><input id="r_ttl" placeholder="64,128,255"></div>
+      <div><label style="font-weight:normal">Source ports (csv)</label><input id="r_sport" placeholder="1024"></div>
+      <div><label style="font-weight:normal">Destination ports (csv)</label><input id="r_dport" placeholder="80,443"></div>
+      <div><label style="font-weight:normal">Source IPs (csv)</label><input id="r_sip" placeholder="5.5.5.1/32"></div>
+      <div><label style="font-weight:normal">Packet size (csv)</label><input id="r_pkt" placeholder="128,512"></div>
+      <div><label style="font-weight:normal">Source Geo (csv)</label><input id="r_geo" placeholder="US,IL"></div>
+      <div><label style="font-weight:normal">Source ASN (csv)</label><input id="r_asn" placeholder="7018"></div>
+      <div><label style="font-weight:normal">Fragment</label><input id="r_frag" placeholder="none"></div>
+      <div><label style="font-weight:normal">Action</label>
+        <select id="r_action"><option value="">(unset)</option><option value="allow">allow</option><option value="block">block</option></select>
+      </div>
+    </div>
+    <button class="sec" onclick="addRule()">&#10133; Add rule to template</button>
+
+    <label style="margin-top:18px">Template rules (JSON) &mdash; edit directly if you prefer</label>
+    <textarea id="tpl_json" rows="12"></textarea>
+    <p class="hint">A JSON array of rule objects. <code>destinationIPs</code> is ignored/overwritten per request.</p>
+    <button onclick="saveTemplate()">&#128190; Save template</button>
+  </div>
+
+  <div class="card">
+    <h2>&#128269; Preview</h2>
+    <p class="sub">See exactly what a CC would receive for a given request network.</p>
+    <label>Request network(s) (csv)</label>
+    <input id="pv_net" value="100.98.10.0/24">
+    <button class="sec" onclick="previewTemplate()">&#9654; Preview response</button>
+    <pre class="log" id="pv_out" style="display:none"></pre>
+  </div>
+</section>
+
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const csv = s => (s||"").split(",").map(x=>x.trim()).filter(Boolean);
+function toast(m, ok=true){const t=document.getElementById("toast");t.textContent=m;t.style.background=ok?"#27ae60":"#c0392b";t.style.display="block";setTimeout(()=>t.style.display="none",3500);}
+function switchTab(name){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===name));
+  document.getElementById("panel-cc").classList.toggle("active",name==="cc");
+  document.getElementById("panel-tpl").classList.toggle("active",name==="tpl");
+}
+
+/* ---------- Tab 1: CC setup ---------- */
+async function configureCC(){
+  const body={
+    cc_host:document.getElementById("cc_host").value.trim(),
+    ssh_port:parseInt(document.getElementById("cc_port").value)||22,
+    ssh_user:document.getElementById("cc_user").value.trim()||"root",
+    ssh_pass:document.getElementById("cc_pass").value,
+    sim_hostport:document.getElementById("cc_sim").value.trim(),
+    restart:document.getElementById("cc_restart").checked
+  };
+  if(!body.cc_host||!body.sim_hostport){toast("CC host and simulator address are required",false);return;}
+  const wrap=document.getElementById("cc_logwrap"),log=document.getElementById("cc_log");
+  wrap.style.display="block";log.textContent="Working... this can take up to a minute (ADE restart).";
+  try{
+    const r=await fetch("/ui/cc/configure",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    log.textContent=(d.log||[]).join("\n");
+    d.ok?(toast("Cyber Controller configured"),loadCCs()):toast("Configuration failed - see log",false);
+  }catch(e){log.textContent="Request error: "+e.message;toast("Request error",false);}
+}
+async function loadCCs(){
+  const el=document.getElementById("cc_table");
+  try{
+    const list=await(await fetch("/ui/cc")).json();
+    if(!list.length){el.innerHTML='<span style="color:#888">No Cyber Controllers configured yet.</span>';return;}
+    el.innerHTML='<table><tr><th>CC host</th><th>Calls simulator</th><th>ADE container</th><th>Configured</th><th></th></tr>'+
+      list.map(c=>`<tr><td><b>${c.cc_host}</b></td><td>${c.sim_hostport||""}</td><td>${c.ade_container||""}</td>
+      <td>${c.configured_at||""} <span class="pill">${c.status||""}</span></td>
+      <td><button class="danger" style="margin:0;padding:4px 10px" onclick="removeCC('${c.cc_host}')">Remove</button></td></tr>`).join("")+'</table>';
+  }catch(e){el.textContent="Could not load list.";}
+}
+async function removeCC(host){
+  if(!confirm("Remove "+host+" from the list? (This does not revert the CC config.)"))return;
+  await fetch("/ui/cc/"+encodeURIComponent(host),{method:"DELETE"});
+  toast("Removed "+host);loadCCs();
+}
+
+/* ---------- Tab 2: template ---------- */
+function currentRules(){
+  const raw=document.getElementById("tpl_json").value.trim();
+  if(!raw)return [];
+  return JSON.parse(raw);
+}
+function addRule(){
+  const rule={};
+  const set=(k,v)=>{if(v.length)rule[k]=v;};
+  set("protocol",csv(document.getElementById("r_proto").value));
+  set("ttl",csv(document.getElementById("r_ttl").value));
+  set("sourcePorts",csv(document.getElementById("r_sport").value));
+  set("destinationPorts",csv(document.getElementById("r_dport").value));
+  set("sourceIPs",csv(document.getElementById("r_sip").value));
+  set("packetSize",csv(document.getElementById("r_pkt").value));
+  set("sourceGeo",csv(document.getElementById("r_geo").value));
+  set("sourceASN",csv(document.getElementById("r_asn").value));
+  const frag=document.getElementById("r_frag").value.trim();if(frag)rule.fragment=frag;
+  const act=document.getElementById("r_action").value;if(act)rule.action=act;
+  let rules;
+  try{rules=currentRules();}catch(e){toast("Existing JSON is invalid: "+e.message,false);return;}
+  rules.push(rule);
+  document.getElementById("tpl_json").value=JSON.stringify(rules,null,2);
+  ["r_proto","r_ttl","r_sport","r_dport","r_sip","r_pkt","r_geo","r_asn","r_frag"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("r_action").value="";
+  toast("Rule added (remember to Save)");
+}
+async function saveTemplate(){
+  let rules;
+  try{rules=currentRules();}catch(e){toast("Invalid JSON: "+e.message,false);return;}
+  if(!Array.isArray(rules)||!rules.length){toast("Template needs at least one rule",false);return;}
+  const body={enabled:document.getElementById("tpl_enabled").checked,rules};
+  const r=await fetch("/ui/template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){toast("Template saved");}else{const d=await r.json();toast("Save failed: "+(d.detail||""),false);}
+}
+async function loadTemplate(){
+  const t=await(await fetch("/ui/template")).json();
+  document.getElementById("tpl_enabled").checked=!!t.enabled;
+  document.getElementById("tpl_json").value=JSON.stringify(t.rules||[],null,2);
+}
+async function previewTemplate(){
+  let rules=null;
+  try{rules=currentRules();}catch(e){/* preview saved template if editor invalid */}
+  const body={networks:csv(document.getElementById("pv_net").value)};
+  if(rules&&rules.length)body.rules=rules;
+  const d=await(await fetch("/ui/template/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+  const out=document.getElementById("pv_out");out.style.display="block";out.textContent=JSON.stringify(d.rules,null,2);
+}
+
+/* init */
+loadCCs();loadTemplate();
+</script>
+</body>
+</html>
+

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from cloud_mock_server import app, rules_store, generation_config
 from permanent_responses import PERMANENT_NETWORK_RULES
+import response_template
 
 client = TestClient(app)
 
@@ -27,6 +28,10 @@ def reset_state():
         "destinationPorts": [], "protocols": ["6", "17"], "tcpFlags": [],
         "packetSize": ["128"], "sourceGeo": ["US"], "sourceASN": ["7018"],
         "fragment": "none", "action": "allow"})
+    # Ensure the recommendation template is disabled by default so the
+    # generation/permanent tests are deterministic regardless of any persisted
+    # data/response_template.json on disk.
+    response_template.set_template({"enabled": False, "rules": [{"action": "allow"}]})
     yield
     generation_config.clear()
     generation_config.update(saved)
@@ -138,4 +143,84 @@ def test_missing_tag_422():
 
 def test_empty_networks_422():
     assert client.post(ENDPOINT, json={"tag": "t", "networks": []}).status_code == 422
+
+
+# --- recommendation template (Tab 2) ----------------------------------------
+
+def _disable_template():
+    client.post("/ui/template", json={"enabled": False, "rules": [{"action": "allow"}]})
+
+
+def test_template_dst_always_matches_request():
+    # Only 'protocol' + 'ttl' set; destination must be forced to the request net.
+    client.post("/ui/template", json={
+        "enabled": True,
+        "rules": [{"protocol": ["6"], "ttl": ["64"]}]})
+    try:
+        body = _post("some-tag", ["203.0.113.0/24"]).json()
+        assert len(body["rules"]) == 1
+        rule = body["rules"][0]
+        assert rule["destinationIPs"] == ["203.0.113.0/24"]
+        assert rule["protocol"] == ["6"]
+        assert rule["ttl"] == ["64"]
+        # optional fields not provided must be absent (not mandatory)
+        assert "sourceGeo" not in rule
+        assert "packetSize" not in rule
+        assert rule["status"] == "success"
+    finally:
+        _disable_template()
+
+
+def test_template_multiple_networks_and_rules():
+    client.post("/ui/template", json={
+        "enabled": True,
+        "rules": [{"action": "allow"}, {"action": "block"}]})
+    try:
+        nets = ["10.1.0.0/24", "10.2.0.0/24"]
+        body = _post("t", nets).json()
+        assert len(body["rules"]) == 4  # 2 rules x 2 networks
+        dests = {ip for r in body["rules"] for ip in r["destinationIPs"]}
+        assert dests == set(nets)
+    finally:
+        _disable_template()
+
+
+def test_template_disabled_falls_back_to_generation():
+    client.post("/ui/template", json={"enabled": False, "rules": [{"action": "allow"}]})
+    body = _post("gen", ["10.0.0.0/8"]).json()
+    # Falls back to auto-generation default shape (has all fixed keys).
+    assert set(body["rules"][0].keys()) >= {"sourceIPs", "protocol", "fragment"}
+
+
+def test_template_preview_does_not_persist():
+    d = client.post("/ui/template/preview", json={
+        "networks": ["198.51.100.0/24"],
+        "rules": [{"protocol": ["17"]}]}).json()
+    assert d["rules"][0]["destinationIPs"] == ["198.51.100.0/24"]
+    assert d["rules"][0]["protocol"] == ["17"]
+
+
+def test_template_requires_rules():
+    assert client.post("/ui/template", json={"enabled": True, "rules": []}).status_code == 400
+
+
+# --- Cyber Controller registry (Tab 1) --------------------------------------
+
+def test_cc_list_endpoint():
+    assert isinstance(client.get("/ui/cc").json(), list)
+
+
+def test_cc_delete_unknown_404():
+    assert client.delete("/ui/cc/no-such-host").status_code == 404
+
+
+# --- UI page -----------------------------------------------------------------
+
+def test_ui_page_served():
+    r = client.get("/ui")
+    assert r.status_code == 200
+    assert "Cyber Controller" in r.text
+    assert "Recommendation Template" in r.text
+
+
 

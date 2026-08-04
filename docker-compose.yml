@@ -8,5 +8,11 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
+    volumes:
+      # Persist UI state (recommendation template + configured CC registry)
+      - socx-sim-data:/app/data
     restart: unless-stopped
+
+volumes:
+  socx-sim-data:
 

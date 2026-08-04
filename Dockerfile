@@ -13,7 +13,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY cloud_mock_server.py permanent_responses.py main.py ./
+COPY cloud_mock_server.py permanent_responses.py response_template.py cc_manager.py main.py ./
+# UI assets served at /ui
+COPY static/ ./static/
+# Writable dir for persisted UI state (template + configured CC registry)
+RUN mkdir -p /app/data
 # Optional: pre-load pinned rules from JSON files if present
 COPY recommendations/ ./recommendations/
 

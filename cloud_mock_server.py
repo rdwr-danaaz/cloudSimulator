@@ -4,10 +4,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
 from permanent_responses import permanent_rules_for
+import response_template
+import cc_manager
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(
     title="SOC-X Cloud Recommendation Simulator",
@@ -81,6 +85,22 @@ class GenerateRequest(BaseModel):
     tag: str
     count: int = Field(default=3, ge=1, le=50)
 
+class TemplateRequest(BaseModel):
+    enabled: bool = True
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+
+class TemplatePreviewRequest(BaseModel):
+    networks: list[str] = Field(default_factory=lambda: ["100.98.10.0/24"])
+    rules: list[dict[str, Any]] | None = None
+
+class ConfigureCCRequest(BaseModel):
+    cc_host: str = Field(min_length=1)
+    ssh_user: str = "root"
+    ssh_pass: str = ""
+    ssh_port: int = 22
+    sim_hostport: str = Field(min_length=1)
+    restart: bool = True
+
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -148,7 +168,13 @@ def get_recommendation(request: GetRecommendationRequest) -> dict[str, Any]:
         rules = permanent
     else:
         raw = rules_store.get(request.tag)
-        rules = [_normalize(r) for r in raw] if raw is not None else _generate(request.networks)
+        if raw is not None:
+            rules = [_normalize(r) for r in raw]
+        elif response_template.is_enabled():
+            # User-edited template: dst network always matches the request.
+            rules = response_template.build_rules(request.networks)
+        else:
+            rules = _generate(request.networks)
     return {
         "account_id": _ACCOUNT_ID,
         "rules": rules,
@@ -161,111 +187,83 @@ def get_recommendation(request: GetRecommendationRequest) -> dict[str, Any]:
     }
 
 
-_UI = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SOC-X Simulator</title>
-<style>
-*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:#f0f2f5;color:#222}
-header{background:#1a3c5e;color:#fff;padding:16px 32px}header h1{margin:0;font-size:1.4rem}
-header p{margin:4px 0 0;font-size:.85rem;opacity:.8}
-main{max-width:960px;margin:24px auto;padding:0 16px 40px}
-.card{background:#fff;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.1);padding:24px;margin-bottom:24px}
-.card h2{margin:0 0 16px;font-size:1.1rem;color:#1a3c5e;border-bottom:2px solid #e0e6f0;padding-bottom:8px}
-label{display:block;font-size:.85rem;font-weight:bold;margin-bottom:4px}
-input,textarea{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:.9rem;margin-bottom:12px}
-input[type=number]{width:130px}.row{display:flex;gap:16px;flex-wrap:wrap}.row .f{flex:1;min-width:180px}
-button{background:#1a3c5e;color:#fff;border:none;padding:10px 24px;border-radius:4px;cursor:pointer;font-size:.9rem}
-button:hover{background:#245080}.hint{font-size:.78rem;color:#888;margin-top:-8px;margin-bottom:12px}
-.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-.badge{background:#e8f0fe;color:#1a3c5e;border-radius:4px;padding:4px 12px;font-size:.82rem;display:flex;align-items:center;gap:8px}
-.rm{background:none;color:#c0392b;padding:0 2px;font-size:1rem;cursor:pointer;border:none}
-.toast{position:fixed;bottom:24px;right:24px;color:#fff;padding:12px 24px;border-radius:6px;display:none;font-size:.9rem;box-shadow:0 4px 12px rgba(0,0,0,.2)}
-</style></head><body>
-<header><h1>&#128737; SOC-X Recommendation Simulator</h1>
-<p>Any Cyber Controller sending a request will receive recommendations. Use this UI to control what gets returned.</p></header>
-<main>
-<div class="card"><h2>&#9881; Auto-Generation Settings</h2>
-<p style="font-size:.85rem;color:#555;margin-top:0">Applies to <b>every request</b> whose tag has no pinned rules.</p>
-<label>Rules per network</label><input type="number" id="cfg_n" value="3" min="1" max="50" style="width:130px">
-<div class="row">
-  <div class="f"><label>Protocols</label><input id="cfg_proto" placeholder="6,17"><p class="hint">6=TCP 17=UDP 2=ICMP</p></div>
-  <div class="f"><label>Source Geo</label><input id="cfg_geo" placeholder="US,IL,DE"></div>
-  <div class="f"><label>Source ASN</label><input id="cfg_asn" placeholder="7018,1234"></div>
-</div>
-<div class="row">
-  <div class="f"><label>Source IPs</label><input id="cfg_sip" placeholder="5.5.5.1/32"></div>
-  <div class="f"><label>Source Ports</label><input id="cfg_sp" placeholder="8080,443"></div>
-  <div class="f"><label>Destination Ports</label><input id="cfg_dp" placeholder="80,1024"></div>
-</div>
-<div class="row">
-  <div class="f"><label>Packet Size</label><input id="cfg_pkt" placeholder="128,512"></div>
-  <div class="f"><label>Fragment</label><input id="cfg_frag" value="none"></div>
-</div>
-<button onclick="saveConfig()">&#128190; Save Settings</button></div>
-
-<div class="card"><h2>&#127919; Pin Custom Rules for a Tag</h2>
-<p style="font-size:.85rem;color:#555;margin-top:0">Requests for this tag always return these rules instead of auto-generated ones.</p>
-<label>Tag / Policy Name</label><input id="pin_tag" placeholder="e.g. icmp  or  Socx_Connection">
-<label>Number of rules to generate</label><input type="number" id="pin_n" value="3" min="1" max="50" style="width:130px">
-<p class="hint">Uses Auto-Generation Settings above. destinationIPs will be the real networks from each request.</p>
-<label>Or paste raw rules JSON (overrides count)</label>
-<textarea id="pin_json" rows="5" style="font-family:monospace;font-size:.82rem"
-  placeholder='[{"ruleId":"rule_abc","destinationIPs":["10.0.0.1/32"],"protocol":["6"],"status":"success"}]'></textarea>
-<p class="hint">Leave empty to auto-generate.</p>
-<button onclick="pinRules()">&#128204; Pin Rules for Tag</button></div>
-
-<div class="card"><h2>&#128203; Pinned Tags</h2>
-<p style="font-size:.85rem;color:#555;margin-top:0">Pinned tags return fixed rules. All others auto-generate from request networks.</p>
-<div class="tags" id="tag_list">Loading&#8230;</div><br>
-<button onclick="reloadDisk()">&#128260; Reload from recommendations/ folder</button></div>
-</main>
-<div class="toast" id="toast"></div>
-<script>
-const csv=s=>s.split(",").map(x=>x.trim()).filter(Boolean);
-function toast(m,ok=true){const t=document.getElementById("toast");t.textContent=m;t.style.background=ok?"#27ae60":"#c0392b";t.style.display="block";setTimeout(()=>t.style.display="none",3000)}
-async function saveConfig(){
-  const b={rules_per_network:parseInt(document.getElementById("cfg_n").value)||3,
-    protocols:csv(document.getElementById("cfg_proto").value),sourceGeo:csv(document.getElementById("cfg_geo").value),
-    sourceASN:csv(document.getElementById("cfg_asn").value),sourceIPs:csv(document.getElementById("cfg_sip").value),
-    sourcePorts:csv(document.getElementById("cfg_sp").value),destinationPorts:csv(document.getElementById("cfg_dp").value),
-    packetSize:csv(document.getElementById("cfg_pkt").value),fragment:document.getElementById("cfg_frag").value||"none"};
-  const r=await fetch("/ui/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-  r.ok?toast("Settings saved!"):toast("Failed",false)}
-async function pinRules(){
-  const tag=document.getElementById("pin_tag").value.trim();
-  if(!tag){toast("Tag cannot be empty",false);return}
-  const raw=document.getElementById("pin_json").value.trim();
-  let rules=[];
-  if(raw){try{rules=JSON.parse(raw)}catch(e){toast("Invalid JSON: "+e.message,false);return}}
-  else{const cnt=parseInt(document.getElementById("pin_n").value)||3;
-    const r=await fetch("/ui/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tag,count:cnt})});
-    if(!r.ok){toast("Could not generate",false);return}rules=(await r.json()).rules}
-  const r=await fetch("/admin/seed",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tag,rules})});
-  r.ok?(toast("Pinned for: "+tag),loadTags()):toast("Failed",false)}
-async function removeTag(tag){await fetch("/admin/seed/"+encodeURIComponent(tag),{method:"DELETE"});toast("Removed: "+tag);loadTags()}
-async function reloadDisk(){const d=await(await fetch("/admin/reload",{method:"POST"})).json();toast("Reloaded "+d.loaded_tags.length+" tag(s)");loadTags()}
-async function loadTags(){const tags=await(await fetch("/admin/tags")).json();const el=document.getElementById("tag_list");
-  const e=Object.entries(tags);if(!e.length){el.innerHTML='<span style="color:#888;font-size:.85rem">No pinned tags — all use auto-generation.</span>';return}
-  el.innerHTML=e.map(([t,c])=>`<div class="badge"><span><b>${t}</b> <span style="opacity:.65">(${c} rules)</span></span><button class="rm" onclick="removeTag('${t}')" title="Remove">&#10005;</button></div>`).join("")}
-async function loadCfg(){const c=await(await fetch("/ui/config")).json();
-  document.getElementById("cfg_n").value=c.rules_per_network;
-  document.getElementById("cfg_proto").value=(c.protocols||[]).join(",");
-  document.getElementById("cfg_geo").value=(c.sourceGeo||[]).join(",");
-  document.getElementById("cfg_asn").value=(c.sourceASN||[]).join(",");
-  document.getElementById("cfg_sip").value=(c.sourceIPs||[]).join(",");
-  document.getElementById("cfg_sp").value=(c.sourcePorts||[]).join(",");
-  document.getElementById("cfg_dp").value=(c.destinationPorts||[]).join(",");
-  document.getElementById("cfg_pkt").value=(c.packetSize||[]).join(",");
-  document.getElementById("cfg_frag").value=c.fragment||"none"}
-loadCfg();loadTags();
-</script></body></html>"""
-
-
+# --------------------------------------------------------------------------- #
+# UI (two tabs: CC setup + recommendation template) served from static/ui.html
+# --------------------------------------------------------------------------- #
 @app.get("/ui", response_class=HTMLResponse)
-def ui() -> str:
-    return _UI
+def ui() -> HTMLResponse:
+    html = (STATIC_DIR / "ui.html")
+    if html.exists():
+        return HTMLResponse(html.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>UI file missing</h1>", status_code=500)
+
+
+# --- Tab 2: recommendation template -----------------------------------------
+@app.get("/ui/template")
+def get_template() -> dict[str, Any]:
+    return response_template.get_template()
+
+
+@app.post("/ui/template")
+def set_template(body: TemplateRequest) -> dict[str, Any]:
+    try:
+        saved = response_template.set_template(
+            {"enabled": body.enabled, "rules": body.rules}
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"saved": True, "template": saved}
+
+
+@app.post("/ui/template/preview")
+def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
+    networks = body.networks or ["100.98.10.0/24"]
+    if body.rules is not None:
+        # Preview arbitrary (unsaved) rules without persisting them.
+        out: list[dict[str, Any]] = []
+        for net in networks:
+            for i, rt in enumerate(body.rules):
+                rule = {"ruleId": rt.get("ruleId") or f"rule_preview_{i}",
+                        "destinationIPs": [net]}
+                for k, v in rt.items():
+                    if k in ("ruleId", "destinationIPs"):
+                        continue
+                    if v not in (None, "", []):
+                        rule[k] = v
+                rule["status"] = "success"
+                out.append(rule)
+        rules = out
+    else:
+        rules = response_template.build_rules(networks)
+    return {"networks": networks, "rules": rules}
+
+
+# --- Tab 1: Cyber Controller configuration ----------------------------------
+@app.get("/ui/cc")
+def list_cc() -> list[dict[str, Any]]:
+    return cc_manager.list_ccs()
+
+
+@app.post("/ui/cc/configure")
+def configure_cc(body: ConfigureCCRequest) -> dict[str, Any]:
+    result = cc_manager.configure_cc(
+        cc_host=body.cc_host,
+        ssh_user=body.ssh_user,
+        ssh_pass=body.ssh_pass,
+        sim_hostport=body.sim_hostport,
+        ssh_port=body.ssh_port,
+        restart=body.restart,
+    )
+    return result
+
+
+@app.delete("/ui/cc/{cc_host}")
+def delete_cc(cc_host: str) -> dict[str, Any]:
+    removed = cc_manager.remove_cc(cc_host)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"CC '{cc_host}' not registered")
+    return {"removed": cc_host}
+
 
 @app.get("/ui/config")
 def get_config() -> dict[str, Any]:
