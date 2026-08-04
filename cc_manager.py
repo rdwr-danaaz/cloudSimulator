@@ -168,13 +168,23 @@ def configure_cc(
             emit(f"ERROR: no running container matching '{ADE_MATCH}'.")
             return {"ok": False, "log": res.log, "entry": None}
         emit(f"ADE container: {ade}")
-        cacerts = run(
-            f"docker exec {ade} sh -c 'find / -name cacerts 2>/dev/null | head -1'",
-            echo=False,
-        )[1].strip()
+        # Prefer $JAVA_HOME (fast) over scanning the whole filesystem for cacerts.
         java_home = run(
             f"docker exec {ade} sh -c 'echo $JAVA_HOME'", echo=False
         )[1].strip()
+        cacerts = ""
+        if java_home:
+            cand = f"{java_home}/lib/security/cacerts"
+            found = run(
+                f"docker exec {ade} sh -c 'test -f {cand} && echo {cand}'",
+                echo=False,
+            )[1].strip()
+            cacerts = found
+        if not cacerts:
+            cacerts = run(
+                f"docker exec {ade} sh -c 'find /usr /opt -name cacerts 2>/dev/null | head -1'",
+                echo=False,
+            )[1].strip()
         keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
         if not cacerts:
             emit("ERROR: could not locate Java cacerts inside the ADE container.")
@@ -235,6 +245,9 @@ def configure_cc(
         }
         _upsert_cc(entry)
         return {"ok": True, "log": res.log, "entry": entry}
+    except Exception as exc:
+        emit(f"ERROR: configuration aborted: {type(exc).__name__}: {exc}")
+        return {"ok": False, "log": res.log, "entry": None}
     finally:
         client.close()
 
@@ -325,13 +338,21 @@ def reset_cc(
             echo=False,
         )[1].strip()
         if ade:
-            cacerts = run(
-                f"docker exec {ade} sh -c 'find / -name cacerts 2>/dev/null | head -1'",
-                echo=False,
-            )[1].strip()
             java_home = run(
                 f"docker exec {ade} sh -c 'echo $JAVA_HOME'", echo=False
             )[1].strip()
+            cacerts = ""
+            if java_home:
+                cand = f"{java_home}/lib/security/cacerts"
+                cacerts = run(
+                    f"docker exec {ade} sh -c 'test -f {cand} && echo {cand}'",
+                    echo=False,
+                )[1].strip()
+            if not cacerts:
+                cacerts = run(
+                    f"docker exec {ade} sh -c 'find /usr /opt -name cacerts 2>/dev/null | head -1'",
+                    echo=False,
+                )[1].strip()
             keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
             if cacerts:
                 rc, _ = run(
@@ -355,8 +376,15 @@ def reset_cc(
         emit(f"Removed {cc_host} from the simulator registry.")
         res.ok = True
         return {"ok": True, "log": res.log}
+    except Exception as exc:
+        emit(f"ERROR: reset aborted: {type(exc).__name__}: {exc}")
+        return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
+
+
 
 
 
