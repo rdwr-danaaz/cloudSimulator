@@ -1,9 +1,9 @@
 from __future__ import annotations
-import hashlib, json
+import hashlib, json, os, socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
@@ -98,7 +98,7 @@ class ConfigureCCRequest(BaseModel):
     ssh_user: str = "root"
     ssh_pass: str = ""
     ssh_port: int = 22
-    sim_hostport: str = Field(min_length=1)
+    sim_hostport: str = ""  # optional: auto-detected server-side when blank
     restart: bool = True
 
 class ResetCCRequest(BaseModel):
@@ -205,6 +205,36 @@ def ui() -> HTMLResponse:
     return HTMLResponse("<h1>UI file missing</h1>", status_code=500)
 
 
+def _detect_ip() -> str:
+    """Best-effort primary outbound IP of this host (for the sim address hint)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return ""
+
+
+@app.get("/ui/siminfo")
+def siminfo(request: Request) -> dict[str, Any]:
+    """Report how CCs should reach this simulator, so the UI can auto-fill it."""
+    port = os.environ.get("PORT", "8080")
+    host_header = request.headers.get("host", "")  # what the browser used
+    detected_ip = _detect_ip()
+    # Prefer the address the operator is already using to reach the UI; that is
+    # almost always reachable from the CC too. Fall back to the detected IP.
+    suggested = host_header or (f"{detected_ip}:{port}" if detected_ip else "")
+    return {
+        "version": app.version,
+        "port": port,
+        "host_header": host_header,
+        "detected_ip": detected_ip,
+        "suggested_sim_hostport": suggested,
+    }
+
+
 # --- Tab 2: recommendation template -----------------------------------------
 @app.get("/ui/template")
 def get_template() -> dict[str, Any]:
@@ -252,12 +282,24 @@ def list_cc() -> list[dict[str, Any]]:
 
 
 @app.post("/ui/cc/configure")
-def configure_cc(body: ConfigureCCRequest) -> dict[str, Any]:
+def configure_cc(body: ConfigureCCRequest, request: Request) -> dict[str, Any]:
+    sim_hostport = body.sim_hostport.strip()
+    if not sim_hostport:
+        # Auto-detect: use the address the operator reached the UI on, else IP.
+        port = os.environ.get("PORT", "8080")
+        sim_hostport = request.headers.get("host", "") or (
+            f"{_detect_ip()}:{port}" if _detect_ip() else ""
+        )
+    if not sim_hostport:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not determine the simulator address; set it under Advanced.",
+        )
     result = cc_manager.configure_cc(
         cc_host=body.cc_host,
         ssh_user=body.ssh_user,
         ssh_pass=body.ssh_pass,
-        sim_hostport=body.sim_hostport,
+        sim_hostport=sim_hostport,
         ssh_port=body.ssh_port,
         restart=body.restart,
     )

@@ -232,7 +232,25 @@ def test_ui_page_served():
     r = client.get("/ui")
     assert r.status_code == 200
     assert "Cyber Controller" in r.text
-    assert "Recommendation Template" in r.text
+    assert "Recommendation" in r.text
+
+
+def test_siminfo_reports_address_and_version():
+    d = client.get("/ui/siminfo").json()
+    assert "version" in d
+    assert "suggested_sim_hostport" in d
+
+
+def test_configure_without_address_uses_host_header():
+    # No sim_hostport supplied; server should derive it and still attempt SSH,
+    # failing gracefully (ok False) rather than 400 for a missing address.
+    r = client.post("/ui/cc/configure", json={
+        "cc_host": "127.0.0.1", "ssh_user": "root", "ssh_pass": "x",
+        "ssh_port": 1}, headers={"host": "sim.example:8080"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+
 
 
 

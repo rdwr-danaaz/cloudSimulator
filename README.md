@@ -77,26 +77,27 @@ curl -k -X POST https://localhost:8080/api/sdcc/genai/core/analysis/peacetime/_g
 
 ## Web UI (`/ui`)
 
-Open `https://<sim-host>:8080/ui` in a browser (accept the self-signed cert).
+Open `https://<sim-host>:8080/ui` in a browser (accept the self-signed cert). The
+UI has a **vertical tab** sidebar and a status header showing the simulator's
+online state, version, and auto-detected endpoint (with a copy button).
 
-**Tab 1 — Cyber Controller Setup.** Enter a CC's host + SSH credentials and the
-address the CC should call this simulator at (`host:port`). The simulator SSHes
-into the CC, sets `socx.positive.cloud.hostname` / `socx.remediation.cloud.hostname`,
-imports the simulator's TLS cert into the ADE Java truststore, and restarts ADE.
-Every configured CC is listed in the table; because the response is built
-per-request, many CCs can share one simulator at the same time. Each row has a
-**Reset** button that restores that CC to its original state — it reverts the ADE
-config from a pristine backup, removes the imported simulator certificate from
-the truststore, restarts ADE, and forgets the CC (**Remove** only drops it from
-the list without reverting).
+**Tab 1 — Cyber Controller.** Enter just the CC host + SSH credentials — the
+**simulator address is auto-detected** (from the address you're browsing on), so
+you don't type it (an override lives under *Advanced*). On submit the simulator
+SSHes into the CC, sets `socx.positive.cloud.hostname` /
+`socx.remediation.cloud.hostname`, imports the simulator's TLS cert into the ADE
+Java truststore, and restarts ADE. Every configured CC is listed; because the
+response is built per-request, many CCs can share one simulator at the same time.
+Each row has a **Reset** button that restores that CC to its original state
+(reverts the ADE config from a pristine backup, removes the imported certificate,
+restarts ADE, forgets the CC) and a **Remove** that only drops it from the list.
 
-**Tab 2 — Recommendation Template.** Edit the JSON returned for any request that
-isn't a pinned network. `destinationIPs` is always overwritten with the
-requesting network, so the destination always matches the request. All other
-fields (TTL, protocol, ports, packet size, geo, ASN, fragment, action) are
-optional — omit any you don't need. Use **Preview** to see the exact response a
-CC would receive for a given network. State is persisted under `data/` (mounted
-as a docker volume).
+**Tab 2 — Recommendation.** Edit the JSON returned for any request that isn't a
+pinned network, with an *active/inactive* badge. `destinationIPs` is always
+overwritten with the requesting network, so the destination always matches the
+request. All other fields (TTL, protocol, ports, packet size, geo, ASN, fragment,
+action) are optional. Use **Preview** to see the exact response a CC would
+receive. State is persisted under `data/` (mounted as a docker volume).
 
 ## Deploy to a new machine running ADE (step by step)
 
@@ -224,6 +225,7 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
 
 
 
