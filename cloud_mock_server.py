@@ -101,6 +101,13 @@ class ConfigureCCRequest(BaseModel):
     sim_hostport: str = Field(min_length=1)
     restart: bool = True
 
+class ResetCCRequest(BaseModel):
+    cc_host: str = Field(min_length=1)
+    ssh_user: str = "root"
+    ssh_pass: str = ""
+    ssh_port: int = 22
+    restart: bool = True
+
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -263,6 +270,17 @@ def delete_cc(cc_host: str) -> dict[str, Any]:
     if not removed:
         raise HTTPException(status_code=404, detail=f"CC '{cc_host}' not registered")
     return {"removed": cc_host}
+
+
+@app.post("/ui/cc/reset")
+def reset_cc(body: ResetCCRequest) -> dict[str, Any]:
+    return cc_manager.reset_cc(
+        cc_host=body.cc_host,
+        ssh_user=body.ssh_user,
+        ssh_pass=body.ssh_pass,
+        ssh_port=body.ssh_port,
+        restart=body.restart,
+    )
 
 
 @app.get("/ui/config")

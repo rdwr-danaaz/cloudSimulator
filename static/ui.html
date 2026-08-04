@@ -81,8 +81,9 @@ th{color:#1a3c5e}
 
   <div class="card">
     <h2>&#128203; Connected Cyber Controllers</h2>
-    <p class="sub">All controllers currently pointed at this simulator.</p>
+    <p class="sub">All controllers currently pointed at this simulator. <b>Reset</b> restores the CC's original ADE config &amp; certificate and forgets it; <b>Remove</b> only drops it from this list.</p>
     <div id="cc_table">Loading&hellip;</div>
+    <div id="cc_reset_logwrap" style="display:none"><label>Reset result</label><pre class="log" id="cc_reset_log"></pre></div>
   </div>
 </section>
 
@@ -173,8 +174,24 @@ async function loadCCs(){
     el.innerHTML='<table><tr><th>CC host</th><th>Calls simulator</th><th>ADE container</th><th>Configured</th><th></th></tr>'+
       list.map(c=>`<tr><td><b>${c.cc_host}</b></td><td>${c.sim_hostport||""}</td><td>${c.ade_container||""}</td>
       <td>${c.configured_at||""} <span class="pill">${c.status||""}</span></td>
-      <td><button class="danger" style="margin:0;padding:4px 10px" onclick="removeCC('${c.cc_host}')">Remove</button></td></tr>`).join("")+'</table>';
+      <td style="white-space:nowrap">
+        <button style="margin:0;padding:4px 10px" onclick="resetCC('${c.cc_host}','${c.ssh_user||'root'}',${c.ssh_port||22})" title="Restore original ADE config + cert, then forget">&#8634; Reset</button>
+        <button class="sec" style="margin:0 0 0 6px;padding:4px 10px" onclick="removeCC('${c.cc_host}')" title="Only remove from this list">Remove</button>
+      </td></tr>`).join("")+'</table>';
   }catch(e){el.textContent="Could not load list.";}
+}
+async function resetCC(host,user,port){
+  const pass=prompt("Reset "+host+" to its original state (restore ADE config + certificate, restart ADE).\n\nEnter the SSH password for '"+user+"' on "+host+":");
+  if(pass===null)return;
+  const wrap=document.getElementById("cc_reset_logwrap"),log=document.getElementById("cc_reset_log");
+  wrap.style.display="block";log.textContent="Resetting "+host+"... this can take up to a minute (ADE restart).";
+  try{
+    const r=await fetch("/ui/cc/reset",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({cc_host:host,ssh_user:user,ssh_pass:pass,ssh_port:port,restart:true})});
+    const d=await r.json();
+    log.textContent=(d.log||[]).join("\n");
+    d.ok?(toast(host+" reset to original"),loadCCs()):toast("Reset failed - see log",false);
+  }catch(e){log.textContent="Request error: "+e.message;toast("Request error",false);}
 }
 async function removeCC(host){
   if(!confirm("Remove "+host+" from the list? (This does not revert the CC config.)"))return;
@@ -236,4 +253,6 @@ loadCCs();loadTemplate();
 </script>
 </body>
 </html>
+
+
 

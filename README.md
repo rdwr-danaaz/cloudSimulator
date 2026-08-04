@@ -84,7 +84,11 @@ address the CC should call this simulator at (`host:port`). The simulator SSHes
 into the CC, sets `socx.positive.cloud.hostname` / `socx.remediation.cloud.hostname`,
 imports the simulator's TLS cert into the ADE Java truststore, and restarts ADE.
 Every configured CC is listed in the table; because the response is built
-per-request, many CCs can share one simulator at the same time.
+per-request, many CCs can share one simulator at the same time. Each row has a
+**Reset** button that restores that CC to its original state — it reverts the ADE
+config from a pristine backup, removes the imported simulator certificate from
+the truststore, restarts ADE, and forgets the CC (**Remove** only drops it from
+the list without reverting).
 
 **Tab 2 — Recommendation Template.** Edit the JSON returned for any request that
 isn't a pinned network. `destinationIPs` is always overwritten with the
@@ -220,6 +224,7 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
 
 
 

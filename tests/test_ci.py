@@ -214,6 +214,18 @@ def test_cc_delete_unknown_404():
     assert client.delete("/ui/cc/no-such-host").status_code == 404
 
 
+def test_cc_reset_unreachable_returns_ok_false():
+    # Reset against a closed port should fail gracefully (ok False) with a log,
+    # not raise. Port 1 on localhost refuses immediately (fast, deterministic).
+    r = client.post("/ui/cc/reset", json={
+        "cc_host": "127.0.0.1", "ssh_user": "root",
+        "ssh_pass": "x", "ssh_port": 1})
+    body = r.json()
+    assert r.status_code == 200
+    assert body["ok"] is False
+    assert any("SSH connection failed" in line for line in body["log"])
+
+
 # --- UI page -----------------------------------------------------------------
 
 def test_ui_page_served():
@@ -221,6 +233,8 @@ def test_ui_page_served():
     assert r.status_code == 200
     assert "Cyber Controller" in r.text
     assert "Recommendation Template" in r.text
+
+
 
 
 

@@ -143,6 +143,10 @@ def configure_cc(
         emit(f"Found properties: {props}")
 
         # 2. Backup + set the two hostname keys
+        # One-time PRISTINE backup so Reset can restore the true original config,
+        # regardless of how many times configure runs afterwards.
+        orig_backup = f"{props}.socxsim-orig"
+        run(f"test -f {orig_backup} || cp -p {props} {orig_backup}", echo=False)
         ts = run("date +%Y%m%d_%H%M%S", echo=False)[1].strip()
         run(f"cp -p {props} {props}.bak_{ts}")
         for key in ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname"):
@@ -218,8 +222,12 @@ def configure_cc(
         res.ok = True
         entry = {
             "cc_host": cc_host,
+            "ssh_user": ssh_user,
+            "ssh_port": ssh_port,
             "sim_hostport": sim_hostport,
             "ade_container": ade,
+            "props_file": props,
+            "orig_backup": orig_backup,
             "configured_at": datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             ),
@@ -229,4 +237,126 @@ def configure_cc(
         return {"ok": True, "log": res.log, "entry": entry}
     finally:
         client.close()
+
+
+def reset_cc(
+    cc_host: str,
+    ssh_user: str,
+    ssh_pass: str,
+    ssh_port: int = 22,
+    restart: bool = True,
+) -> dict[str, Any]:
+    """Restore a CC to its original state and forget it.
+
+    Steps:
+      1. Restore ade.config.properties from the pristine backup (or clear the
+         two socx.*.cloud.hostname keys if no backup exists).
+      2. Remove the imported simulator cert alias from the ADE truststore.
+      3. Restart the ADE container.
+      4. Remove the CC from the simulator's registry.
+
+    Returns {ok, log}.
+    """
+    import paramiko  # lazy
+
+    res = _Result()
+
+    def emit(msg: str) -> None:
+        res.line(msg)
+
+    # Look up what we recorded when configuring (props path, orig backup).
+    known = next((c for c in list_ccs() if c.get("cc_host") == cc_host), {})
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        emit(f"Connecting to {cc_host}:{ssh_port} as {ssh_user} ...")
+        client.connect(
+            cc_host,
+            port=ssh_port,
+            username=ssh_user,
+            password=ssh_pass,
+            timeout=20,
+            banner_timeout=30,
+        )
+    except Exception as exc:
+        emit(f"ERROR: SSH connection failed: {exc}")
+        return {"ok": False, "log": res.log}
+
+    def run(cmd: str, echo: bool = True) -> tuple[int, str]:
+        _i, o, e = client.exec_command(cmd, timeout=180)
+        out = o.read().decode(errors="replace")
+        err = e.read().decode(errors="replace")
+        rc = o.channel.recv_exit_status()
+        if echo:
+            emit(f"$ {cmd}")
+            if out.strip():
+                emit(out.strip())
+            if err.strip():
+                emit(f"[stderr] {err.strip()}")
+        return rc, out
+
+    try:
+        # 1. Locate properties (prefer the path recorded at configure time)
+        props = known.get("props_file") or run(
+            "find /var/lib/docker -name ade.config.properties 2>/dev/null | head -1",
+            echo=False,
+        )[1].strip()
+        if not props:
+            emit("WARNING: ade.config.properties not found; skipping config revert.")
+        else:
+            orig_backup = known.get("orig_backup") or f"{props}.socxsim-orig"
+            has_backup = run(f"test -f {orig_backup} && echo yes || echo no", echo=False)[1].strip()
+            if has_backup == "yes":
+                run(f"cp -p {orig_backup} {props}")
+                emit(f"Restored original ADE config from {orig_backup}")
+            else:
+                # No pristine backup: remove the two keys we would have set.
+                for key in ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname"):
+                    run(
+                        f"sed -i -E '/^[[:space:]]*{key}[[:space:]]*=/d' {props}",
+                        echo=False,
+                    )
+                emit("No pristine backup found; removed socx.*.cloud.hostname keys.")
+
+        # 2. Remove the imported simulator cert from the ADE truststore
+        ade = known.get("ade_container") or run(
+            f"docker ps --format '{{{{.Names}}}}' | grep -i '{ADE_MATCH}' | head -1",
+            echo=False,
+        )[1].strip()
+        if ade:
+            cacerts = run(
+                f"docker exec {ade} sh -c 'find / -name cacerts 2>/dev/null | head -1'",
+                echo=False,
+            )[1].strip()
+            java_home = run(
+                f"docker exec {ade} sh -c 'echo $JAVA_HOME'", echo=False
+            )[1].strip()
+            keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
+            if cacerts:
+                rc, _ = run(
+                    f"docker exec {ade} {keytool} -delete -alias {ALIAS} "
+                    f"-keystore {cacerts} -storepass {STOREPASS}"
+                )
+                emit(
+                    "Removed simulator cert from ADE truststore."
+                    if rc == 0
+                    else "Simulator cert alias not present (already clean)."
+                )
+            # 3. Restart ADE
+            if restart:
+                run(f"docker restart {ade}")
+                emit("ADE restarted with its original configuration.")
+        else:
+            emit("WARNING: ADE container not found; skipped cert removal/restart.")
+
+        # 4. Forget the CC
+        remove_cc(cc_host)
+        emit(f"Removed {cc_host} from the simulator registry.")
+        res.ok = True
+        return {"ok": True, "log": res.log}
+    finally:
+        client.close()
+
+
 
