@@ -345,10 +345,15 @@ function addRule(){
 async function saveTemplate(){
   let rules;try{rules=currentRules();}catch(e){toast("Invalid JSON: "+e.message,false);return;}
   if(!Array.isArray(rules)||!rules.length){toast("Template needs at least one rule",false);return;}
-  const body={enabled:document.getElementById("tpl_enabled").checked,
-    networks:csv(document.getElementById("pv_net").value),rules};
+  const nets=csv(document.getElementById("pv_net").value);
+  if(!nets.length){toast("Set at least one Request network at the top",false);return;}
+  const netStr=nets.join(", ");
+  const msg="Are you sure that "+netStr+" "+(nets.length>1?"are the destination networks":"is the destination network")+
+    " you want to use?\n\nEvery recommendation returned by this template will have its destination set to "+netStr+".";
+  if(!confirm(msg))return;
+  const body={enabled:document.getElementById("tpl_enabled").checked,networks:nets,rules};
   const r=await fetch("/ui/template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(r.ok){toast("Template saved");renderBadge();}else{const d=await r.json();toast("Save failed: "+(d.detail||""),false);}
+  if(r.ok){toast("Template saved (destination: "+netStr+")");renderBadge();}else{const d=await r.json();toast("Save failed: "+(d.detail||""),false);}
 }
 async function loadTemplate(){
   const t=await(await fetch("/ui/template")).json();
@@ -442,6 +447,7 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
 
 
 
