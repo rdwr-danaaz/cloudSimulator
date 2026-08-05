@@ -138,6 +138,9 @@ th{color:#1a3c5e}
         <b>destination network always matches the incoming request</b> &mdash; every
         other field (TTL, protocol, ports, geo, ASN&hellip;) is optional.
       </p>
+      <label>Request network(s) (csv)</label>
+      <input id="pv_net" value="100.98.10.0/24" title="Networks used for Preview; saved together with the template">
+      <p class="hint">Used for the Preview below and saved with the template.</p>
       <div class="switch">
         <input type="checkbox" id="tpl_enabled" onchange="renderBadge()">
         <label style="margin:0">Use this template for responses (off = built-in auto-generation)</label>
@@ -169,10 +172,8 @@ th{color:#1a3c5e}
 
     <div class="card">
       <h2>&#128269; Preview a live response</h2>
-      <p class="sub">See exactly what a CC would receive for a given request network.</p>
-      <label>Request network(s) (csv)</label>
-      <input id="pv_net" value="100.98.10.0/24">
-      <button class="sec" onclick="previewTemplate()" title="Build the response for the given network(s) without saving">&#9654; Preview</button>
+      <p class="sub">See exactly what a CC would receive for the <b>Request network(s)</b> set at the top of this tab.</p>
+      <button class="sec" onclick="previewTemplate()" title="Build the response for the Request network(s) above without saving">&#9654; Preview</button>
       <pre class="log" id="pv_out" style="display:none"></pre>
     </div>
   </section>
@@ -326,13 +327,15 @@ function addRule(){
 async function saveTemplate(){
   let rules;try{rules=currentRules();}catch(e){toast("Invalid JSON: "+e.message,false);return;}
   if(!Array.isArray(rules)||!rules.length){toast("Template needs at least one rule",false);return;}
-  const body={enabled:document.getElementById("tpl_enabled").checked,rules};
+  const body={enabled:document.getElementById("tpl_enabled").checked,
+    networks:csv(document.getElementById("pv_net").value),rules};
   const r=await fetch("/ui/template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   if(r.ok){toast("Template saved");renderBadge();}else{const d=await r.json();toast("Save failed: "+(d.detail||""),false);}
 }
 async function loadTemplate(){
   const t=await(await fetch("/ui/template")).json();
   document.getElementById("tpl_enabled").checked=!!t.enabled;
+  document.getElementById("pv_net").value=(t.networks||["100.98.10.0/24"]).join(",");
   document.getElementById("tpl_json").value=JSON.stringify(t.rules||[],null,2);
   renderBadge();
 }
@@ -412,6 +415,9 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
+
+
 
 
 

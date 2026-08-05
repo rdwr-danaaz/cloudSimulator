@@ -87,6 +87,7 @@ class GenerateRequest(BaseModel):
 
 class TemplateRequest(BaseModel):
     enabled: bool = True
+    networks: list[str] = Field(default_factory=lambda: ["100.98.10.0/24"])
     rules: list[dict[str, Any]] = Field(default_factory=list)
 
 class TemplatePreviewRequest(BaseModel):
@@ -243,7 +244,7 @@ def get_template() -> dict[str, Any]:
 def set_template(body: TemplateRequest) -> dict[str, Any]:
     try:
         saved = response_template.set_template(
-            {"enabled": body.enabled, "rules": body.rules}
+            {"enabled": body.enabled, "networks": body.networks, "rules": body.rules}
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

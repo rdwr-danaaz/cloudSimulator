@@ -46,6 +46,7 @@ _OPTIONAL_FIELDS = (
 # A sensible starter template: one permissive rule. Users edit this in the UI.
 _DEFAULT_TEMPLATE: dict[str, Any] = {
     "enabled": False,
+    "networks": ["100.98.10.0/24"],
     "rules": [
         {
             "protocol": ["6", "17"],
@@ -94,8 +95,13 @@ def set_template(data: dict[str, Any]) -> dict[str, Any]:
     for i, r in enumerate(rules):
         if not isinstance(r, dict):
             raise ValueError(f"rule #{i} must be a JSON object")
+    networks = data.get("networks")
+    if not isinstance(networks, list):
+        networks = ["100.98.10.0/24"]
+    networks = [str(n).strip() for n in networks if str(n).strip()]
     normalized = {
         "enabled": bool(data.get("enabled", True)),
+        "networks": networks or ["100.98.10.0/24"],
         "rules": rules,
     }
     with _LOCK:
@@ -140,5 +146,7 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
             rule["status"] = "success"
             out.append(rule)
     return out
+
+
 
 

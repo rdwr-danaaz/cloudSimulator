@@ -207,6 +207,23 @@ def test_template_requires_rules():
     assert client.post("/ui/template", json={"enabled": True, "rules": []}).status_code == 400
 
 
+def test_template_saves_request_networks():
+    client.post("/ui/template", json={
+        "enabled": True,
+        "networks": ["10.20.30.0/24", "10.20.40.0/24"],
+        "rules": [{"protocol": ["6"]}]})
+    t = client.get("/ui/template").json()
+    assert t["networks"] == ["10.20.30.0/24", "10.20.40.0/24"]
+    _disable_template()
+
+
+def test_template_networks_default_when_omitted():
+    client.post("/ui/template", json={"enabled": True, "rules": [{"action": "allow"}]})
+    t = client.get("/ui/template").json()
+    assert t["networks"] == ["100.98.10.0/24"]
+    _disable_template()
+
+
 # --- Cyber Controller registry (Tab 1) --------------------------------------
 
 def test_cc_list_endpoint():
@@ -272,6 +289,7 @@ def test_configure_without_address_uses_host_header():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
+
 
 
 
