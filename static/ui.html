@@ -382,7 +382,12 @@ async function loadRecs(){
       const nets = (g.networks&&g.networks.length)?g.networks.join(", "):"";
       const netChip = nets?`<span class="badge info" title="Destination network(s) matched on each request">dst: ${escapeHtml(nets)}</span>`:"";
       const rows = g.rules.map((r,i)=>{
-        const dst = (r.destinationIPs&&r.destinationIPs.length)?fmt(r.destinationIPs):(nets||"\u2014");
+        // For the template, the destination is ALWAYS overwritten with the
+        // request network at runtime, so show that (matches the dst chip) rather
+        // than any (ignored) destinationIPs stored in the rule.
+        const dst = (g.kind==="template" && nets)
+          ? nets
+          : ((r.destinationIPs&&r.destinationIPs.length)?fmt(r.destinationIPs):(nets||"\u2014"));
         return `<tr>
         <td>${i+1}</td>
         <td>${fmt(r.protocol)}</td>
@@ -437,6 +442,7 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
 
 
 
