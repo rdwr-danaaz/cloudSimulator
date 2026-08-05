@@ -293,16 +293,18 @@ def list_recommendations() -> dict[str, Any]:
         template_group = [{
             "kind": "template",
             "key": f"Template (current \u2014 {state})",
+            "networks": tpl.get("networks", []),
             "count": len(tpl["rules"]),
             "rules": tpl["rules"],
         }]
     permanent = [
-        {"kind": "permanent", "key": net, "count": len(rules), "rules": rules}
+        {"kind": "permanent", "key": net, "networks": [net],
+         "count": len(rules), "rules": rules}
         for net, rules in PERMANENT_NETWORK_RULES.items()
     ]
     seeded = [
-        {"kind": "seeded", "key": tag, "count": len(rules),
-         "rules": [_normalize(r) for r in rules]}
+        {"kind": "seeded", "key": tag, "networks": [],
+         "count": len(rules), "rules": [_normalize(r) for r in rules]}
         for tag, rules in rules_store.items()
     ]
     return {"groups": template_group + permanent + seeded}

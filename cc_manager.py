@@ -118,8 +118,8 @@ def configure_cc(
         emit(f"ERROR: SSH connection failed: {exc}")
         return {"ok": False, "log": res.log, "entry": None}
 
-    def run(cmd: str, echo: bool = True) -> tuple[int, str]:
-        _i, o, e = client.exec_command(cmd, timeout=180)
+    def run(cmd: str, echo: bool = True, timeout: int = 180) -> tuple[int, str]:
+        _i, o, e = client.exec_command(cmd, timeout=timeout)
         out = o.read().decode(errors="replace")
         err = e.read().decode(errors="replace")
         rc = o.channel.recv_exit_status()
@@ -132,11 +132,22 @@ def configure_cc(
         return rc, out
 
     try:
-        # 1. Locate ade.config.properties
+        # 1. Locate ade.config.properties. Search only the docker *volumes* dir
+        # (small) instead of the whole data-root, which includes huge overlay2
+        # layers and can take minutes -> SSH read timeout on some CCs.
+        droot = run(
+            "docker info -f '{{.DockerRootDir}}' 2>/dev/null | head -1", echo=False
+        )[1].strip() or "/var/lib/docker"
         props = run(
-            "find /var/lib/docker -name ade.config.properties 2>/dev/null | head -1",
+            f"find {droot}/volumes -maxdepth 4 -name ade.config.properties 2>/dev/null | head -1",
             echo=False,
         )[1].strip()
+        if not props:
+            props = run(
+                "find /var/lib/docker -maxdepth 6 -name ade.config.properties 2>/dev/null | head -1",
+                echo=False,
+                timeout=300,
+            )[1].strip()
         if not props:
             emit("ERROR: ade.config.properties not found on this host.")
             return {"ok": False, "log": res.log, "entry": None}
@@ -296,8 +307,8 @@ def reset_cc(
         emit(f"ERROR: SSH connection failed: {exc}")
         return {"ok": False, "log": res.log}
 
-    def run(cmd: str, echo: bool = True) -> tuple[int, str]:
-        _i, o, e = client.exec_command(cmd, timeout=180)
+    def run(cmd: str, echo: bool = True, timeout: int = 180) -> tuple[int, str]:
+        _i, o, e = client.exec_command(cmd, timeout=timeout)
         out = o.read().decode(errors="replace")
         err = e.read().decode(errors="replace")
         rc = o.channel.recv_exit_status()
@@ -310,11 +321,23 @@ def reset_cc(
         return rc, out
 
     try:
-        # 1. Locate properties (prefer the path recorded at configure time)
-        props = known.get("props_file") or run(
-            "find /var/lib/docker -name ade.config.properties 2>/dev/null | head -1",
-            echo=False,
-        )[1].strip()
+        # 1. Locate properties (prefer the path recorded at configure time; else
+        # search the small docker volumes dir, not the whole data-root).
+        props = known.get("props_file", "")
+        if not props:
+            droot = run(
+                "docker info -f '{{.DockerRootDir}}' 2>/dev/null | head -1", echo=False
+            )[1].strip() or "/var/lib/docker"
+            props = run(
+                f"find {droot}/volumes -maxdepth 4 -name ade.config.properties 2>/dev/null | head -1",
+                echo=False,
+            )[1].strip()
+            if not props:
+                props = run(
+                    "find /var/lib/docker -maxdepth 6 -name ade.config.properties 2>/dev/null | head -1",
+                    echo=False,
+                    timeout=300,
+                )[1].strip()
         if not props:
             emit("WARNING: ade.config.properties not found; skipping config revert.")
         else:
@@ -399,6 +422,8 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
 
 
 

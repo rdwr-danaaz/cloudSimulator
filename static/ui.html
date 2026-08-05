@@ -361,18 +361,22 @@ async function loadRecs(){
     el.innerHTML=REC_GROUPS.map((g,idx)=>{
       const cls = g.kind==="permanent" ? "on" : (g.kind==="template" ? "info" : "off");
       const badge = `<span class="badge ${cls}">${g.kind}</span>`;
-      const rows = g.rules.map((r,i)=>`<tr>
+      const nets = (g.networks&&g.networks.length)?g.networks.join(", "):"";
+      const netChip = nets?`<span class="badge info" title="Destination network(s) matched on each request">dst: ${escapeHtml(nets)}</span>`:"";
+      const rows = g.rules.map((r,i)=>{
+        const dst = (r.destinationIPs&&r.destinationIPs.length)?fmt(r.destinationIPs):(nets||"\u2014");
+        return `<tr>
         <td>${i+1}</td>
         <td>${fmt(r.protocol)}</td>
         <td>${escapeHtml(fmt(r.sourceIPs))}</td>
-        <td>${escapeHtml(fmt(r.destinationIPs))}</td>
+        <td>${escapeHtml(dst)}</td>
         <td>${fmt(r.sourcePorts)}</td>
         <td>${fmt(r.destinationPorts)}</td>
         <td>${fmt(r.ttl)}</td>
         <td>${fmt(r.fragment)}</td>
-        <td>${fmt(r.action)}</td></tr>`).join("");
+        <td>${fmt(r.action)}</td></tr>`;}).join("");
       return `<div class="recgroup">
-        <div class="rechead">${badge} <b>${escapeHtml(g.key)}</b>
+        <div class="rechead">${badge} <b>${escapeHtml(g.key)}</b> ${netChip}
           <span style="opacity:.65">(${g.count} rule${g.count===1?'':'s'})</span>
           <span class="spacer"></span>
           <button class="sec small" onclick="viewGroupJson(${idx})" title="Inspect the full JSON for this set">&#128269; View JSON</button>
@@ -415,6 +419,7 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
 
 
 
