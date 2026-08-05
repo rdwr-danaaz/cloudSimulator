@@ -132,9 +132,10 @@ def configure_cc(
         return rc, out
 
     try:
-        # 1. Locate ade.config.properties. Search only the docker *volumes* dir
-        # (small) instead of the whole data-root, which includes huge overlay2
-        # layers and can take minutes -> SSH read timeout on some CCs.
+        # ---- PREFLIGHT (read-only): validate everything before changing anything
+        # so a CC can never be left half-configured. ----
+        emit("Preflight checks...")
+        # 1. Locate ade.config.properties (search only docker volumes -> fast).
         droot = run(
             "docker info -f '{{.DockerRootDir}}' 2>/dev/null | head -1", echo=False
         )[1].strip() or "/var/lib/docker"
@@ -151,15 +152,65 @@ def configure_cc(
         if not props:
             emit("ERROR: ade.config.properties not found on this host.")
             return {"ok": False, "log": res.log, "entry": None}
-        emit(f"Found properties: {props}")
+        emit(f"  [ok] properties: {props}")
 
-        # 2. Backup + set the two hostname keys
-        # One-time PRISTINE backup so Reset can restore the true original config,
-        # regardless of how many times configure runs afterwards.
+        # 2. Find ADE container, truststore, keytool.
+        ade = run(
+            f"docker ps --format '{{{{.Names}}}}' | grep -i '{ADE_MATCH}' | head -1",
+            echo=False,
+        )[1].strip()
+        if not ade:
+            emit(f"ERROR: no running container matching '{ADE_MATCH}'.")
+            return {"ok": False, "log": res.log, "entry": None}
+        emit(f"  [ok] ADE container: {ade}")
+        java_home = run(
+            f"docker exec {ade} sh -c 'echo $JAVA_HOME'", echo=False
+        )[1].strip()
+        cacerts = ""
+        if java_home:
+            cand = f"{java_home}/lib/security/cacerts"
+            cacerts = run(
+                f"docker exec {ade} sh -c 'test -f {cand} && echo {cand}'",
+                echo=False,
+            )[1].strip()
+        if not cacerts:
+            cacerts = run(
+                f"docker exec {ade} sh -c 'find /usr /opt -name cacerts 2>/dev/null | head -1'",
+                echo=False,
+            )[1].strip()
+        keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
+        if not cacerts:
+            emit("ERROR: could not locate Java cacerts inside the ADE container.")
+            return {"ok": False, "log": res.log, "entry": None}
+        emit(f"  [ok] truststore: {cacerts}")
+
+        # 3. Reachability: fetch the simulator's live cert FROM the CC. This proves
+        # the CC can reach the simulator before we touch its config.
+        sim_host = sim_hostport.split(":")[0]
+        sim_port = sim_hostport.split(":")[1] if ":" in sim_hostport else "8080"
+        fetch = (
+            f"echo | openssl s_client -connect {sim_host}:{sim_port} "
+            f"-servername {sim_host} 2>/dev/null "
+            f"| openssl x509 -outform PEM > /tmp/socx-sim.crt; "
+            f"test -s /tmp/socx-sim.crt && echo OK || echo EMPTY"
+        )
+        if "OK" not in run(fetch, echo=False, timeout=30)[1]:
+            emit(
+                f"ERROR: this CC cannot reach the simulator at {sim_host}:{sim_port}. "
+                "No changes were made. Check routing/firewall between the CC and the "
+                "simulator, and that the simulator container is running."
+            )
+            return {"ok": False, "log": res.log, "entry": None}
+        emit(f"  [ok] CC can reach simulator at {sim_host}:{sim_port}")
+        emit("Preflight passed. Applying configuration...")
+
+        # ---- APPLY (mutating): only runs once every preflight check passed. ----
+        # 4. Backup + set the two hostname keys. A one-time PRISTINE backup lets
+        # Reset restore the true original regardless of later re-configures.
         orig_backup = f"{props}.socxsim-orig"
         run(f"test -f {orig_backup} || cp -p {props} {orig_backup}", echo=False)
         ts = run("date +%Y%m%d_%H%M%S", echo=False)[1].strip()
-        run(f"cp -p {props} {props}.bak_{ts}")
+        run(f"cp -p {props} {props}.bak_{ts}", echo=False)
         for key in ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname"):
             line = f"{key} = {sim_hostport}"
             script = (
@@ -170,54 +221,7 @@ def configure_cc(
             rc, _ = run(script, echo=False)
             emit(f"  set {key} -> {sim_hostport}  [{'ok' if rc == 0 else 'FAILED'}]")
 
-        # 3. Find ADE container, truststore, keytool
-        ade = run(
-            f"docker ps --format '{{{{.Names}}}}' | grep -i '{ADE_MATCH}' | head -1",
-            echo=False,
-        )[1].strip()
-        if not ade:
-            emit(f"ERROR: no running container matching '{ADE_MATCH}'.")
-            return {"ok": False, "log": res.log, "entry": None}
-        emit(f"ADE container: {ade}")
-        # Prefer $JAVA_HOME (fast) over scanning the whole filesystem for cacerts.
-        java_home = run(
-            f"docker exec {ade} sh -c 'echo $JAVA_HOME'", echo=False
-        )[1].strip()
-        cacerts = ""
-        if java_home:
-            cand = f"{java_home}/lib/security/cacerts"
-            found = run(
-                f"docker exec {ade} sh -c 'test -f {cand} && echo {cand}'",
-                echo=False,
-            )[1].strip()
-            cacerts = found
-        if not cacerts:
-            cacerts = run(
-                f"docker exec {ade} sh -c 'find /usr /opt -name cacerts 2>/dev/null | head -1'",
-                echo=False,
-            )[1].strip()
-        keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
-        if not cacerts:
-            emit("ERROR: could not locate Java cacerts inside the ADE container.")
-            return {"ok": False, "log": res.log, "entry": None}
-        emit(f"truststore: {cacerts}")
-
-        # 4. Fetch the simulator's live cert and import it
-        sim_host = sim_hostport.split(":")[0]
-        sim_port = sim_hostport.split(":")[1] if ":" in sim_hostport else "8080"
-        fetch = (
-            f"echo | openssl s_client -connect {sim_host}:{sim_port} "
-            f"-servername {sim_host} 2>/dev/null "
-            f"| openssl x509 -outform PEM > /tmp/socx-sim.crt; "
-            f"test -s /tmp/socx-sim.crt && echo OK || echo EMPTY"
-        )
-        if "OK" not in run(fetch, echo=False)[1]:
-            emit(
-                f"ERROR: could not retrieve a certificate from {sim_host}:{sim_port}. "
-                "Is the simulator running and reachable from this CC?"
-            )
-            return {"ok": False, "log": res.log, "entry": None}
-        emit(f"Fetched simulator cert from {sim_host}:{sim_port}")
+        # 5. Import the simulator cert into the ADE truststore.
         run(f"docker cp /tmp/socx-sim.crt {ade}:/tmp/{ALIAS}.crt", echo=False)
         run(
             f"docker exec {ade} {keytool} -delete -alias {ALIAS} "
@@ -226,19 +230,36 @@ def configure_cc(
         )
         rc, _ = run(
             f"docker exec {ade} {keytool} -importcert -noprompt -alias {ALIAS} "
-            f"-file /tmp/{ALIAS}.crt -keystore {cacerts} -storepass {STOREPASS}"
+            f"-file /tmp/{ALIAS}.crt -keystore {cacerts} -storepass {STOREPASS}",
+            echo=False,
         )
         if rc != 0:
             emit("ERROR: keytool import failed.")
             return {"ok": False, "log": res.log, "entry": None}
         emit("Certificate imported into ADE truststore.")
 
-        # 5. Restart ADE
+        # 6. Restart ADE.
         if restart:
-            run(f"docker restart {ade}")
+            run(f"docker restart {ade}", echo=False)
             emit("ADE restarted. It will pick up the new cloud hostname and cert.")
         else:
             emit("Skipped ADE restart (restart the ADE container to apply).")
+
+        # 7. Post-verify: confirm config + cert are actually in place.
+        set_ok = run(
+            f"grep -cE 'socx\\.(positive|remediation)\\.cloud\\.hostname[[:space:]]*=[[:space:]]*"
+            f"{sim_hostport.replace('.', chr(92)+'.')}' {props}",
+            echo=False,
+        )[1].strip()
+        alias_ok = run(
+            f"docker exec {ade} {keytool} -list -alias {ALIAS} "
+            f"-keystore {cacerts} -storepass {STOREPASS} >/dev/null 2>&1 && echo yes || echo no",
+            echo=False,
+        )[1].strip()
+        emit(
+            f"Verified: hostname lines set = {set_ok}/2, cert trusted = "
+            f"{'yes' if alias_ok == 'yes' else 'NO'}."
+        )
 
         res.ok = True
         entry = {
@@ -259,6 +280,94 @@ def configure_cc(
     except Exception as exc:
         emit(f"ERROR: configuration aborted: {type(exc).__name__}: {exc}")
         return {"ok": False, "log": res.log, "entry": None}
+    finally:
+        client.close()
+
+
+def preflight_cc(
+    cc_host: str,
+    ssh_user: str,
+    ssh_pass: str,
+    sim_hostport: str,
+    ssh_port: int = 22,
+) -> dict[str, Any]:
+    """Read-only validation before configuring a CC. Makes NO changes.
+
+    Returns {ok, checks:[{name, ok, detail}]}. Use this to catch problems
+    (unreachable CC, missing ADE, no route to the simulator, ...) up front.
+    """
+    import paramiko  # lazy
+
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, ok: bool, detail: str = "") -> None:
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            cc_host, port=ssh_port, username=ssh_user, password=ssh_pass,
+            timeout=15, banner_timeout=25,
+        )
+    except Exception as exc:
+        add("SSH login", False, str(exc))
+        return {"ok": False, "checks": checks}
+    add("SSH login", True, f"{ssh_user}@{cc_host}:{ssh_port}")
+
+    def out(cmd: str, timeout: int = 60) -> str:
+        try:
+            _i, o, _e = client.exec_command(cmd, timeout=timeout)
+            return o.read().decode(errors="replace").strip()
+        except Exception as exc:
+            return f"__ERR__ {exc}"
+
+    try:
+        # docker available
+        dv = out("docker version --format '{{.Server.Version}}' 2>/dev/null")
+        add("Docker available", bool(dv) and "__ERR__" not in dv, dv or "docker not found")
+
+        # ADE container
+        ade = out(
+            f"docker ps --format '{{{{.Names}}}}' | grep -i '{ADE_MATCH}' | head -1"
+        )
+        add("ADE container running", bool(ade), ade or f"no '{ADE_MATCH}' container")
+
+        # properties file (fast search)
+        droot = out("docker info -f '{{.DockerRootDir}}' 2>/dev/null | head -1") or "/var/lib/docker"
+        props = out(
+            f"find {droot}/volumes -maxdepth 4 -name ade.config.properties 2>/dev/null | head -1"
+        )
+        add("ADE config found", bool(props), props or "ade.config.properties not found")
+
+        # truststore
+        cacerts = ""
+        if ade:
+            jh = out(f"docker exec {ade} sh -c 'echo $JAVA_HOME'")
+            if jh:
+                cacerts = out(
+                    f"docker exec {ade} sh -c 'test -f {jh}/lib/security/cacerts && echo {jh}/lib/security/cacerts'"
+                )
+        add("Java truststore found", bool(cacerts), cacerts or "cacerts not located")
+
+        # reachability to the simulator
+        sim_host = sim_hostport.split(":")[0]
+        sim_port = sim_hostport.split(":")[1] if ":" in sim_hostport else "8080"
+        reach = out(
+            f"echo | openssl s_client -connect {sim_host}:{sim_port} "
+            f"-servername {sim_host} 2>/dev/null | openssl x509 -noout -subject 2>/dev/null "
+            f"&& echo REACH_OK",
+            timeout=30,
+        )
+        add(
+            f"CC can reach simulator ({sim_host}:{sim_port})",
+            "REACH_OK" in reach,
+            "TLS handshake ok" if "REACH_OK" in reach
+            else "no route / port blocked / simulator down",
+        )
+
+        ok = all(c["ok"] for c in checks)
+        return {"ok": ok, "checks": checks}
     finally:
         client.close()
 
@@ -422,6 +531,8 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
 
 
 

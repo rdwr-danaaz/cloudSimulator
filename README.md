@@ -92,6 +92,13 @@ Each row has a **Reset** button that restores that CC to its original state
 (reverts the ADE config from a pristine backup, removes the imported certificate,
 restarts ADE, forgets the CC) and a **Remove** that only drops it from the list.
 
+Before configuring, click **Test connection** to run read-only preflight checks
+that make **no changes**: SSH login, Docker present, ADE container running, ADE
+config + Java truststore found, and that the CC can actually **reach the
+simulator** over TLS. Configure itself runs these checks first and **aborts
+before touching anything** if one fails, so a CC is never left half-configured;
+it also verifies the hostname and cert are in place at the end.
+
 **Tab 2 — Recommendation.** Edit the JSON returned for any request that isn't a
 pinned network, with an *active/inactive* badge. `destinationIPs` is always
 overwritten with the requesting network, so the destination always matches the
@@ -230,6 +237,7 @@ python deploy/generate_install_guide.py
 ## License
 
 Released under the [MIT License](LICENSE).
+
 
 
 

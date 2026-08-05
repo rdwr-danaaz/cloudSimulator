@@ -218,6 +218,23 @@ def _detect_ip() -> str:
         return ""
 
 
+def _resolve_sim_hostport(supplied: str, request: Request) -> str:
+    """Return the address CCs should call: explicit override, else auto-detected."""
+    sim = (supplied or "").strip()
+    if sim:
+        return sim
+    port = os.environ.get("PORT", "8080")
+    sim = request.headers.get("host", "") or (
+        f"{_detect_ip()}:{port}" if _detect_ip() else ""
+    )
+    if not sim:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not determine the simulator address; set it under Advanced.",
+        )
+    return sim
+
+
 @app.get("/ui/siminfo")
 def siminfo(request: Request) -> dict[str, Any]:
     """Report how CCs should reach this simulator, so the UI can auto-fill it."""
@@ -318,18 +335,7 @@ def list_cc() -> list[dict[str, Any]]:
 
 @app.post("/ui/cc/configure")
 def configure_cc(body: ConfigureCCRequest, request: Request) -> dict[str, Any]:
-    sim_hostport = body.sim_hostport.strip()
-    if not sim_hostport:
-        # Auto-detect: use the address the operator reached the UI on, else IP.
-        port = os.environ.get("PORT", "8080")
-        sim_hostport = request.headers.get("host", "") or (
-            f"{_detect_ip()}:{port}" if _detect_ip() else ""
-        )
-    if not sim_hostport:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not determine the simulator address; set it under Advanced.",
-        )
+    sim_hostport = _resolve_sim_hostport(body.sim_hostport, request)
     result = cc_manager.configure_cc(
         cc_host=body.cc_host,
         ssh_user=body.ssh_user,
@@ -339,6 +345,23 @@ def configure_cc(body: ConfigureCCRequest, request: Request) -> dict[str, Any]:
         restart=body.restart,
     )
     return result
+
+
+@app.post("/ui/cc/test")
+def test_cc(body: ConfigureCCRequest, request: Request) -> dict[str, Any]:
+    """Read-only preflight: validate a CC before configuring (makes no changes)."""
+    sim_hostport = _resolve_sim_hostport(body.sim_hostport, request)
+    try:
+        return cc_manager.preflight_cc(
+            cc_host=body.cc_host,
+            ssh_user=body.ssh_user,
+            ssh_pass=body.ssh_pass,
+            sim_hostport=sim_hostport,
+            ssh_port=body.ssh_port,
+        )
+    except Exception as exc:  # never 500 the UI
+        return {"ok": False, "checks": [
+            {"name": "Preflight", "ok": False, "detail": f"{type(exc).__name__}: {exc}"}]}
 
 
 @app.delete("/ui/cc/{cc_host}")

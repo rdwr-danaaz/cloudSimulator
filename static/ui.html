@@ -116,6 +116,8 @@ th{color:#1a3c5e}
         <div class="switch"><input type="checkbox" id="cc_restart" checked><label style="margin:0">Restart ADE after configuring</label></div>
       </details>
       <button onclick="configureCC()" title="SSH into the CC, point its ADE at this simulator, trust the cert, and restart ADE">&#9889; Configure Cyber Controller</button>
+      <button class="sec" onclick="testCC()" title="Validate SSH, Docker, ADE and reachability to the simulator without changing anything">&#129514; Test connection</button>
+      <div id="cc_checkwrap" style="display:none"><label>Preflight checks</label><div id="cc_checks"></div></div>
       <div id="cc_logwrap" style="display:none"><label>Result</label><pre class="log" id="cc_log"></pre></div>
     </div>
 
@@ -244,8 +246,8 @@ async function loadStatus(){
 }
 
 /* ---------- Tab 1: CC setup ---------- */
-async function configureCC(){
-  const body={
+function ccBody(){
+  return {
     cc_host:document.getElementById("cc_host").value.trim(),
     ssh_port:parseInt(document.getElementById("cc_port").value)||22,
     ssh_user:document.getElementById("cc_user").value.trim()||"root",
@@ -253,6 +255,22 @@ async function configureCC(){
     sim_hostport:document.getElementById("cc_sim").value.trim(),  // blank => auto
     restart:document.getElementById("cc_restart").checked
   };
+}
+async function testCC(){
+  const body=ccBody();
+  if(!body.cc_host){toast("Cyber Controller host is required",false);return;}
+  if(!body.ssh_pass){toast("SSH password is required",false);return;}
+  const wrap=document.getElementById("cc_checkwrap"),box=document.getElementById("cc_checks");
+  wrap.style.display="block";box.innerHTML="Running preflight checks\u2026";
+  try{
+    const d=await readJson(await fetch("/ui/cc/test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}));
+    const rows=(d.checks||[]).map(c=>`<div style="padding:4px 0">${c.ok?'\u2705':'\u274C'} <b>${c.name}</b>${c.detail?` <span style="opacity:.7">\u2014 ${escapeHtml(c.detail)}</span>`:''}</div>`).join("");
+    box.innerHTML=rows||"No checks returned.";
+    d.ok?toast("All checks passed \u2014 safe to Configure"):toast("Some checks failed \u2014 fix before configuring",false);
+  }catch(e){box.textContent="Request error: "+e.message;toast("Request error",false);}
+}
+async function configureCC(){
+  const body=ccBody();
   if(!body.cc_host){toast("Cyber Controller host is required",false);return;}
   if(!body.ssh_pass){toast("SSH password is required",false);return;}
   const wrap=document.getElementById("cc_logwrap"),log=document.getElementById("cc_log");
@@ -419,6 +437,8 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
+
 
 
 

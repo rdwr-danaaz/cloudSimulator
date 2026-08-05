@@ -234,6 +234,17 @@ def test_cc_delete_unknown_404():
     assert client.delete("/ui/cc/no-such-host").status_code == 404
 
 
+def test_cc_preflight_unreachable_returns_checks():
+    # Preflight against a closed port fails on SSH login but must not 500,
+    # and should return a structured checks list.
+    r = client.post("/ui/cc/test", json={
+        "cc_host": "127.0.0.1", "ssh_user": "root", "ssh_pass": "x", "ssh_port": 1})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert any(c["name"] == "SSH login" and c["ok"] is False for c in body["checks"])
+
+
 def test_cc_reset_unreachable_returns_ok_false():
     # Reset against a closed port should fail gracefully (ok False) with a log,
     # not raise. Port 1 on localhost refuses immediately (fast, deterministic).
@@ -289,6 +300,7 @@ def test_configure_without_address_uses_host_header():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
+
 
 
 
