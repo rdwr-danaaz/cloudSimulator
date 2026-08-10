@@ -42,6 +42,46 @@ STOREPASS = "changeit"
 KT_ENV = "-e JAVA_TOOL_OPTIONS= -e _JAVA_OPTIONS= -e JDK_JAVA_OPTIONS="
 
 
+def _ssh_connect(client, host: str, user: str, password: str, port: int = 22) -> None:
+    """Open a robust, password-ONLY SSH session.
+
+    Forcing allow_agent/look_for_keys off is important for stability: with the
+    defaults, paramiko tries local SSH keys/agent first, which can exhaust the
+    server's MaxAuthTries and cause a spurious 'Authentication failed' even when
+    the password is correct.
+    """
+    client.connect(
+        host,
+        port=port,
+        username=user,
+        password=password,
+        timeout=20,
+        banner_timeout=30,
+        auth_timeout=25,
+        allow_agent=False,
+        look_for_keys=False,
+    )
+
+
+def _friendly_ssh_error(exc: Exception) -> str:
+    """Turn a paramiko/socket exception into an actionable message."""
+    import paramiko  # lazy
+    import socket as _socket
+
+    if isinstance(exc, paramiko.AuthenticationException):
+        return ("Authentication failed. Check the SSH username/password for this "
+                "CC (watch for typos, trailing spaces, or Caps Lock). If the CC "
+                "disables root password login, use an allowed account.")
+    if isinstance(exc, paramiko.BadHostKeyException):
+        return f"Host key verification failed: {exc}"
+    if isinstance(exc, (_socket.timeout,)) or "timed out" in str(exc).lower():
+        return ("Connection timed out. Check the host/IP and SSH port, and that "
+                "the CC is reachable from the simulator (routing/firewall).")
+    if "refused" in str(exc).lower():
+        return "Connection refused. Is SSH running on that host/port?"
+    return f"{type(exc).__name__}: {exc}"
+
+
 # --------------------------------------------------------------------------- #
 # Registry helpers
 # --------------------------------------------------------------------------- #
@@ -112,16 +152,9 @@ def configure_cc(
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         emit(f"Connecting to {cc_host}:{ssh_port} as {ssh_user} ...")
-        client.connect(
-            cc_host,
-            port=ssh_port,
-            username=ssh_user,
-            password=ssh_pass,
-            timeout=20,
-            banner_timeout=30,
-        )
+        _ssh_connect(client, cc_host, ssh_user, ssh_pass, ssh_port)
     except Exception as exc:
-        emit(f"ERROR: SSH connection failed: {exc}")
+        emit(f"ERROR: SSH connection failed: {_friendly_ssh_error(exc)}")
         return {"ok": False, "log": res.log, "entry": None}
 
     def run(cmd: str, echo: bool = True, timeout: int = 180) -> tuple[int, str]:
@@ -313,12 +346,9 @@ def preflight_cc(
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        client.connect(
-            cc_host, port=ssh_port, username=ssh_user, password=ssh_pass,
-            timeout=15, banner_timeout=25,
-        )
+        _ssh_connect(client, cc_host, ssh_user, ssh_pass, ssh_port)
     except Exception as exc:
-        add("SSH login", False, str(exc))
+        add("SSH login", False, _friendly_ssh_error(exc))
         return {"ok": False, "checks": checks}
     add("SSH login", True, f"{ssh_user}@{cc_host}:{ssh_port}")
 
@@ -411,16 +441,9 @@ def reset_cc(
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
         emit(f"Connecting to {cc_host}:{ssh_port} as {ssh_user} ...")
-        client.connect(
-            cc_host,
-            port=ssh_port,
-            username=ssh_user,
-            password=ssh_pass,
-            timeout=20,
-            banner_timeout=30,
-        )
+        _ssh_connect(client, cc_host, ssh_user, ssh_pass, ssh_port)
     except Exception as exc:
-        emit(f"ERROR: SSH connection failed: {exc}")
+        emit(f"ERROR: SSH connection failed: {_friendly_ssh_error(exc)}")
         return {"ok": False, "log": res.log}
 
     def run(cmd: str, echo: bool = True, timeout: int = 180) -> tuple[int, str]:
@@ -538,6 +561,10 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
+
+
 
 
 
