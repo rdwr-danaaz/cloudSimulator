@@ -35,6 +35,12 @@ ADE_MATCH = "anomaly-detection-engine"
 ALIAS = "socx-sim"
 STOREPASS = "changeit"
 
+# keytool is a JVM tool and inherits JAVA_TOOL_OPTIONS from the ADE container.
+# Some ADEs set a JDWP remote-debug agent there (address=*:PORT); keytool then
+# tries to bind that (already-used) debug port and aborts. Clear the JVM option
+# env vars for our keytool invocations so it runs cleanly.
+KT_ENV = "-e JAVA_TOOL_OPTIONS= -e _JAVA_OPTIONS= -e JDK_JAVA_OPTIONS="
+
 
 # --------------------------------------------------------------------------- #
 # Registry helpers
@@ -224,17 +230,18 @@ def configure_cc(
         # 5. Import the simulator cert into the ADE truststore.
         run(f"docker cp /tmp/socx-sim.crt {ade}:/tmp/{ALIAS}.crt", echo=False)
         run(
-            f"docker exec {ade} {keytool} -delete -alias {ALIAS} "
+            f"docker exec {KT_ENV} {ade} {keytool} -delete -alias {ALIAS} "
             f"-keystore {cacerts} -storepass {STOREPASS} 2>/dev/null || true",
             echo=False,
         )
-        rc, _ = run(
-            f"docker exec {ade} {keytool} -importcert -noprompt -alias {ALIAS} "
-            f"-file /tmp/{ALIAS}.crt -keystore {cacerts} -storepass {STOREPASS}",
+        rc, out = run(
+            f"docker exec {KT_ENV} {ade} {keytool} -importcert -noprompt -alias {ALIAS} "
+            f"-file /tmp/{ALIAS}.crt -keystore {cacerts} -storepass {STOREPASS} 2>&1",
             echo=False,
         )
         if rc != 0:
-            emit("ERROR: keytool import failed.")
+            detail = out.strip().splitlines()[-1] if out.strip() else "unknown error"
+            emit(f"ERROR: keytool import failed: {detail}")
             return {"ok": False, "log": res.log, "entry": None}
         emit("Certificate imported into ADE truststore.")
 
@@ -252,7 +259,7 @@ def configure_cc(
             echo=False,
         )[1].strip()
         alias_ok = run(
-            f"docker exec {ade} {keytool} -list -alias {ALIAS} "
+            f"docker exec {KT_ENV} {ade} {keytool} -list -alias {ALIAS} "
             f"-keystore {cacerts} -storepass {STOREPASS} >/dev/null 2>&1 && echo yes || echo no",
             echo=False,
         )[1].strip()
@@ -506,7 +513,7 @@ def reset_cc(
             keytool = f"{java_home}/bin/keytool" if java_home else "keytool"
             if cacerts:
                 rc, _ = run(
-                    f"docker exec {ade} {keytool} -delete -alias {ALIAS} "
+                    f"docker exec {KT_ENV} {ade} {keytool} -delete -alias {ALIAS} "
                     f"-keystore {cacerts} -storepass {STOREPASS}"
                 )
                 emit(
@@ -531,6 +538,9 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
+
 
 
 
