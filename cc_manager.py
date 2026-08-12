@@ -63,6 +63,49 @@ def _ssh_connect(client, host: str, user: str, password: str, port: int = 22) ->
     )
 
 
+# Docker bridge networks used by the simulator host itself. A CC address inside
+# these ranges is almost certainly a Docker-INTERNAL IP (not the CC's real
+# management IP) and can never be routed to from the simulator, because the
+# simulator resolves them to its own docker0 / br-* interfaces.
+_SIM_DOCKER_NETS = ("172.17.0.0/16", "172.18.0.0/16")
+
+
+def validate_cc_host(cc_host: str) -> str | None:
+    """Return an error string if cc_host can't possibly be a routable CC, else None.
+
+    Prevents the confusing failures where a user enters a Docker-internal or
+    otherwise non-routable address (e.g. 172.17.142.3, 127.0.0.1) which the
+    simulator can never reach. Any real CC management IP/hostname passes, so no
+    per-network routes are needed on the simulator.
+    """
+    import ipaddress
+
+    host = (cc_host or "").strip()
+    if not host:
+        return "Enter the Cyber Controller's host / IP."
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Not a literal IP -> treat as a hostname; let DNS/SSH resolve it.
+        return None
+    if ip.is_loopback:
+        return (f"{host} is a loopback address. Enter the CC's real management "
+                "IP (e.g. 10.205.50.10), not localhost.")
+    if ip.is_unspecified or ip.is_multicast or ip.is_reserved:
+        return f"{host} is not a valid Cyber Controller address."
+    if ip.is_link_local:
+        return f"{host} is a link-local address and is not routable."
+    for net in _SIM_DOCKER_NETS:
+        if ip in ipaddress.ip_network(net):
+            return (
+                f"{host} looks like a Docker-internal IP ({net}), which collides "
+                "with the simulator's own Docker bridge and can never be reached. "
+                "Enter the Cyber Controller's REAL management IP (e.g. 10.205.50.10) "
+                "— the address you SSH to it on — not a container/Docker-internal IP."
+            )
+    return None
+
+
 def _friendly_ssh_error(exc: Exception) -> str:
     """Turn a paramiko/socket exception into an actionable message."""
     import paramiko  # lazy
@@ -147,6 +190,11 @@ def configure_cc(
 
     def emit(msg: str) -> None:
         res.line(msg)
+
+    host_err = validate_cc_host(cc_host)
+    if host_err:
+        emit(f"ERROR: {host_err}")
+        return {"ok": False, "log": res.log, "entry": None}
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -342,6 +390,11 @@ def preflight_cc(
 
     def add(name: str, ok: bool, detail: str = "") -> None:
         checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    host_err = validate_cc_host(cc_host)
+    if host_err:
+        add("Valid CC address", False, host_err)
+        return {"ok": False, "checks": checks}
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -561,6 +614,10 @@ def reset_cc(
         return {"ok": False, "log": res.log}
     finally:
         client.close()
+
+
+
+
 
 
 

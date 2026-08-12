@@ -235,14 +235,42 @@ def test_cc_delete_unknown_404():
 
 
 def test_cc_preflight_unreachable_returns_checks():
-    # Preflight against a closed port fails on SSH login but must not 500,
-    # and should return a structured checks list.
+    # Preflight against a closed port fails on SSH login but must not 500, and
+    # should return a structured checks list. Use the hostname "localhost" (not
+    # the literal 127.0.0.1, which host validation now rejects) so the request
+    # passes address validation and fails fast at SSH login instead.
     r = client.post("/ui/cc/test", json={
-        "cc_host": "127.0.0.1", "ssh_user": "root", "ssh_pass": "x", "ssh_port": 1})
+        "cc_host": "localhost", "ssh_user": "root", "ssh_pass": "x", "ssh_port": 1})
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
     assert any(c["name"] == "SSH login" and c["ok"] is False for c in body["checks"])
+
+
+def test_cc_host_validation_rejects_docker_and_loopback():
+    import cc_manager
+    # Docker-internal / self address collides with the simulator's own bridge.
+    assert cc_manager.validate_cc_host("172.17.142.3") is not None
+    assert cc_manager.validate_cc_host("172.18.0.5") is not None
+    # Loopback / unspecified / link-local are not routable CC addresses.
+    assert cc_manager.validate_cc_host("127.0.0.1") is not None
+    assert cc_manager.validate_cc_host("0.0.0.0") is not None
+    assert cc_manager.validate_cc_host("169.254.1.1") is not None
+    assert cc_manager.validate_cc_host("") is not None
+    # Real management IPs and hostnames are accepted (no route added needed).
+    assert cc_manager.validate_cc_host("10.205.50.10") is None
+    assert cc_manager.validate_cc_host("10.28.100.103") is None
+    assert cc_manager.validate_cc_host("cc.example.com") is None
+
+
+def test_cc_configure_rejects_docker_ip_without_ssh():
+    # A Docker-internal CC host must be rejected up front (no SSH attempted).
+    r = client.post("/ui/cc/configure", json={
+        "cc_host": "172.17.142.3", "ssh_user": "root", "ssh_pass": "x"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert any("Docker-internal" in line for line in body["log"])
 
 
 def test_cc_reset_unreachable_returns_ok_false():
@@ -300,6 +328,7 @@ def test_configure_without_address_uses_host_header():
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is False
+
 
 
 

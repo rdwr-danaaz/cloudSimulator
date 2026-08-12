@@ -101,7 +101,7 @@ th{color:#1a3c5e}
         <b id="simaddr">&hellip;</b>. You don't need to enter it.
       </div>
       <div class="row">
-        <div class="f"><label>Cyber Controller host / IP</label><input id="cc_host" placeholder="10.205.50.10"></div>
+        <div class="f"><label>Cyber Controller host / IP</label><input id="cc_host" placeholder="10.205.50.10"><small class="hint">Use the CC's real management IP (the one you SSH to) — not a Docker-internal address like 172.17.x.x. Any reachable subnet works; no route setup needed on the simulator.</small></div>
       </div>
       <div class="row">
         <div class="f"><label>SSH user</label><input id="cc_user" value="root"></div>
@@ -447,6 +447,7 @@ loadStatus();loadCCs();loadTemplate();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
+
 
 
 
