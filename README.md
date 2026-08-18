@@ -5,19 +5,16 @@
 A lightweight FastAPI service that simulates the SOC-X cloud
 `_getRecommendation` API used by the **anomaly-detection-engine (ADE)**. It
 returns deterministic, pinned rule sets for specific networks (and generated
-rules otherwise), served over **HTTPS**, and ships with a one-command installer
-that wires it into ADE automatically.
+rules otherwise), served over **HTTPS**. It runs on its own Linux host and any
+Cyber Controller (ADE) on the network can be pointed at it.
 
 > ### 📘 Which document should I follow to install?
-> - **This `README.md` is the canonical source of truth** — use it if you're
->   working with the code or the repo. Start at
->   [Deploy to a new machine running ADE](#deploy-to-a-new-machine-running-ade-step-by-step).
-> - **`INSTALL_GUIDE.docx`** is a polished, shareable Word version of the same
->   steps, meant for operators/customers who want an offline document to follow
->   or print. It is **generated from this repo** (see
->   [Installation guide](#installation-guide)), so it always mirrors these steps.
->
-> Both describe the same installation; pick the format that suits you.
+> - **This `README.md` is the canonical source of truth.** To stand the
+>   simulator up on its own server, follow
+>   [Install on a standalone Linux machine](#install-on-a-standalone-linux-machine-step-by-step).
+> - If instead you want the simulator to run **directly on an ADE host** and
+>   auto-wire itself into that local ADE, see
+>   [Alternative: install directly on an ADE host](#alternative-install-directly-on-an-ade-host).
 
 ## Features
 
