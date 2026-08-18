@@ -301,14 +301,26 @@ async function resetCC(host,user,port){
   const pass=prompt("Reset "+host+" to its original state (restore ADE config + certificate, restart ADE).\n\nEnter the SSH password for '"+user+"' on "+host+":");
   if(pass===null)return;
   const wrap=document.getElementById("cc_reset_logwrap"),log=document.getElementById("cc_reset_log");
-  wrap.style.display="block";log.textContent="Resetting "+host+"... this can take up to a minute (ADE restart).";
+  wrap.style.display="block";log.textContent="Resetting "+host+"... this can take a couple of minutes (SSH + ADE restart). Please wait.";
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),300000); // 5 min hard cap
   try{
     const r=await fetch("/ui/cc/reset",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({cc_host:host,ssh_user:user,ssh_pass:pass,ssh_port:port,restart:true})});
+      body:JSON.stringify({cc_host:host,ssh_user:user,ssh_pass:pass,ssh_port:port,restart:true}),signal:ctrl.signal});
     const d=await readJson(r);
     log.textContent=(d.log||[]).join("\n");
     d.ok?(toast(host+" reset to original"),loadCCs()):toast("Reset failed - see log",false);
-  }catch(e){log.textContent="Request error: "+e.message;toast("Request error",false);}
+  }catch(e){
+    // "Failed to fetch"/abort means the response never came back (long ADE restart
+    // or a network blip) - the reset may still have completed on the server. Don't
+    // present it as a hard failure: refresh the list so the user can see the truth.
+    const aborted=e.name==="AbortError";
+    log.textContent=(aborted?"The reset is taking longer than 5 minutes":"The connection dropped before a reply arrived ("+e.message+")")
+      +".\n\nThis usually means the reset is still finishing on "+host+" (SSH + ADE restart), so it may have ALREADY succeeded."
+      +"\nRefreshing the list now - if "+host+" is gone, the reset worked. If it is still listed, wait a few seconds and click Reset again.";
+    toast("No reply yet - refreshing list",false);
+    setTimeout(loadCCs,1500);
+  }finally{clearTimeout(timer);}
 }
 async function removeCC(host){
   if(!confirm("Remove "+host+" from the list? (This does not revert the CC config.)"))return;
