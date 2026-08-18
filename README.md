@@ -111,12 +111,155 @@ per-network responses and any seeded tags — in a friendly table. **View JSON**
 opens a full JSON viewer (with copy), and **Copy to Template** loads a set into
 Tab 2 as a starting point (the destination is re-matched per request).
 
-## Deploy to a new machine running ADE (step by step)
+## Install on a standalone Linux machine (step by step)
 
-The installer is plug-and-play: point it at a host running the
-anomaly-detection-engine and it does the rest (build, run on ADE's docker
-network, configure ADE, import the TLS cert into ADE's Java truststore, restart
-ADE, and verify end-to-end).
+This is the recommended deployment: the simulator runs on its **own Linux VM /
+server**, and one or more Cyber Controllers (ADEs) elsewhere on the network are
+pointed at `https://<sim-host>:8080`. The simulator does **not** need to run on
+an ADE.
+
+### Prerequisites
+
+**Target Linux machine (where the simulator will run):**
+
+| Requirement | Recommended |
+|-------------|-------------|
+| OS | Ubuntu 20.04/22.04 LTS or Debian 11/12 (x86-64). The installer uses `apt`. |
+| CPU / RAM | 2 vCPU / 2 GB RAM (1 vCPU / 1 GB works for light use) |
+| Disk | ~5 GB free (Docker Engine + image + logs) |
+| Privileges | An SSH login whose user has **sudo** (Docker is installed with it) |
+| Inbound network | TCP **8080** (or your chosen port) reachable from every ADE that will use the simulator |
+| Outbound network | Internet access to `get.docker.com`, `download.docker.com`, and `github.com` for the one-time install (or pre-install Docker + copy the repo for an air-gapped host) |
+| Static address | A stable IP/hostname the ADEs can reach (it is baked into the TLS cert's SAN) |
+
+**Workstation that runs the installer (your laptop — not the target):**
+
+- Python **3.9+** and `pip`
+- Network/SSH access to the target machine
+- Install the deploy tooling once:
+
+  ```bash
+  pip install -r deploy/requirements-deploy.txt
+  ```
+
+> Docker, git, openssl and curl do **not** need to be pre-installed on the
+> target — the installer installs them. You only need SSH + a sudo user.
+
+### Option A — Automated remote install (recommended)
+
+From your workstation, run the standalone installer. It SSHes into the target
+and does everything end-to-end: waits for cloud-init/apt locks, installs Docker
+Engine, clones the repo, generates a TLS cert whose **SAN includes the host IP**,
+builds and starts the container, opens the firewall port (if `ufw` is active),
+and verifies `/health`.
+
+```bash
+python deploy/install_standalone.py \
+    --host 10.205.102.81 \
+    --user socx \
+    --password '***' \
+    --port 8080
+```
+
+Flags:
+
+- `--host` — target IP/hostname (also used for the cert SAN)
+- `--user` / `--password` — SSH login with sudo
+- `--port` — host port to expose (default `8080`)
+- `--repo` — git URL to clone (defaults to this repository)
+
+On success it prints the live URL. Verify from anywhere:
+
+```bash
+curl -k https://10.205.102.81:8080/health
+```
+
+Then open the UI at `https://10.205.102.81:8080/ui` (accept the self-signed
+cert).
+
+### Option B — Manual install on the box
+
+If you prefer to run the steps yourself (e.g. an air-gapped host), SSH into the
+target and run:
+
+```bash
+# 1) Docker Engine (skip if already installed)
+sudo apt-get update -y
+sudo apt-get install -y ca-certificates curl gnupg git openssl
+curl -fsSL https://get.docker.com | sudo sh
+sudo systemctl enable --now docker
+
+# 2) Get the project
+cd "$HOME"
+git clone https://github.com/rdwr-danaaz/cloudSimulator.git
+cd cloudSimulator
+
+# 3) Generate a TLS cert whose SAN includes THIS host's IP
+HOST_IP=10.205.102.81
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+  -keyout certs/server.key -out certs/server.crt \
+  -subj "/CN=socx-sim" \
+  -addext "subjectAltName=DNS:socx-sim,DNS:localhost,IP:127.0.0.1,IP:${HOST_IP}"
+
+# 4) Build & start
+sudo docker compose up -d --build
+
+# 5) (If ufw is active) open the port, then verify
+sudo ufw allow 8080/tcp || true
+curl -k https://localhost:8080/health
+```
+
+To expose a different host port, edit the left side of the `ports` mapping in
+`docker-compose.yml` (e.g. `"9443:8080"`) and open that port instead.
+
+### Point your Cyber Controllers (ADEs) at the simulator
+
+Once the simulator is up, connect each ADE to it. The easiest way is the **web
+UI → Tab 1 (Cyber Controller)**: enter the CC host + SSH credentials and click
+**Configure** — the simulator sets the ADE's `socx.*.cloud.hostname`, imports
+its TLS cert into the ADE Java truststore, and restarts ADE (use **Test
+connection** first for read-only preflight checks).
+
+To do the same from the CLI (e.g. to script it), trust the simulator's live cert
+in an ADE and point it at the endpoint:
+
+```bash
+python deploy/trust_live_cert_in_ade.py \
+    --ade-host 10.205.50.10 --ade-pass '***' \
+    --cloud-host 10.205.102.81 --cloud-port 8080
+```
+
+This auto-detects the ADE container and truststore, fetches the cert the
+endpoint is **actually serving**, imports it into the ADE container's `cacerts`,
+restarts the ADE, and tails the logs to confirm the cloud call succeeds. Without
+it the ADE fails the TLS handshake with `PKIX path building failed`.
+
+> The trust survives `docker restart` but **not** ADE container recreation
+> (`docker rm` / `compose up` / upgrades). Re-run the script (or the UI
+> Configure) after recreating the ADE container. Importing one cert under a
+> unique alias does not disable TLS validation or affect anything else on the CC.
+
+### Day-2 operations
+
+```bash
+# On the simulator host, from ~/cloudSimulator:
+sudo docker compose ps                 # status
+sudo docker compose logs -f socx-sim   # tail logs
+git pull && sudo docker compose up -d --build   # update to latest
+sudo docker compose down               # stop (data volume is preserved)
+```
+
+State (the editable recommendation template + configured-CC registry) persists
+in the `socx-sim-data` Docker volume across restarts and rebuilds.
+
+## Alternative: install directly on an ADE host
+
+Use this only if you want the simulator to run **on the ADE machine itself** and
+auto-wire into that local ADE container. The installer is plug-and-play: point
+it at a host running the anomaly-detection-engine and it does the rest (build,
+run on ADE's docker network, configure ADE, import the TLS cert into ADE's Java
+truststore, restart ADE, and verify end-to-end).
 
 1. **Install the deploy tooling** (on your workstation, not the target):
 
@@ -152,43 +295,6 @@ python deploy/install.py --uninstall       # remove container + revert ADE confi
 python deploy/install.py --config other.json   # target a different machine
 ```
 
-## Standalone deployment (simulator on its own host)
-
-Sometimes the simulator runs on a **separate VM** and one or more ADEs point at
-it across the network (e.g. simulator on `10.205.102.81`, a CC/ADE on
-`10.205.50.10`). Two steps are involved:
-
-1. **Install the simulator on its own host** (installs Docker, clones the repo,
-   generates a cert whose SAN includes the host IP, and runs the container):
-
-   ```bash
-   python deploy/install_standalone.py --host 10.205.102.81 --user socx --password '***' --port 8080
-   ```
-
-   The simulator is then live at
-   `https://<host>:8080/api/sdcc/genai/core/analysis/peacetime/_getRecommendation`.
-
-2. **Point each ADE at it and trust its certificate.** Set the ADE's
-   `socx.*.cloud.hostname` to `<sim-host>:8080`, then import the simulator's
-   self-signed cert into that ADE's Java truststore (otherwise the ADE fails the
-   TLS handshake with `PKIX path building failed`):
-
-   ```bash
-   python deploy/trust_live_cert_in_ade.py \
-       --ade-host 10.205.50.10 --ade-pass '***' \
-       --cloud-host 10.205.102.81 --cloud-port 8080
-   ```
-
-   This auto-detects the ADE container and truststore, fetches the cert the
-   endpoint is **actually serving** (from the ADE host), imports it into the ADE
-   container's `cacerts`, restarts the ADE, and tails the logs to confirm the
-   cloud call succeeds. It also prints the cert's SANs and warns if the dialed
-   IP is missing from them.
-
-   > The trust survives `docker restart` but **not** ADE container recreation
-   > (`docker rm` / `compose up` / upgrades). Re-run the script after recreating
-   > the ADE container. Importing one cert under a unique alias does not disable
-   > TLS validation or affect anything else on the CC.
 
 ## Testing
 
