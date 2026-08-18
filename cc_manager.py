@@ -528,7 +528,7 @@ def reset_cc(
                 props = run(
                     "find /var/lib/docker -maxdepth 6 -name ade.config.properties 2>/dev/null | head -1",
                     echo=False,
-                    timeout=300,
+                    timeout=90,
                 )[1].strip()
         if not props:
             emit("WARNING: ade.config.properties not found; skipping config revert.")
