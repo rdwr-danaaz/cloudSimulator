@@ -28,11 +28,17 @@ app = FastAPI(
     description="Simulates _getRecommendation. Open /ui to configure.",
 )
 
-rules_store: dict[str, list[dict[str, Any]]] = {}
+_ACCOUNT_ID = "67d6a0d9c39077bed7e1f23e"
 
-# Scale-test specs keyed by tag, so a materialized scale set can be regenerated
-# for the streaming download without keeping the whole list in memory.
-scale_specs: dict[str, dict[str, Any]] = {}
+# Per-Cyber-Controller recommendation sets, keyed by the CC's PRIMARY IP.
+# One set per CC (regenerating replaces it). Each set is bound to a single
+# destination network and may also list a SECONDARY CC IP for HA (primary +
+# secondary controllers), so a request from either IP resolves to the same set.
+#   cc_sets[cc_ip] = {
+#       "cc_ip", "secondary_ip", "destination_network",
+#       "mode", "count", "created_at", "rules": [...]
+#   }
+cc_sets: dict[str, dict[str, Any]] = {}
 
 
 @app.exception_handler(RequestValidationError)
@@ -48,48 +54,24 @@ async def _validation_error_handler(request: Request, exc: RequestValidationErro
     return JSONResponse(status_code=422, content={"detail": "; ".join(parts) or "Invalid request."})
 
 
-generation_config: dict[str, Any] = {
-    "rules_per_network": 3,
-    "sourceIPs": [],
-    "sourcePorts": [],
-    "destinationPorts": [],
-    "protocols": ["6", "17"],
-    "tcpFlags": [],
-    "packetSize": ["128"],
-    "sourceGeo": ["US"],
-    "sourceASN": ["7018"],
-    "fragment": "none",
-    "action": "allow",
-}
-
-RECOMMENDATIONS_DIR = Path(__file__).parent / "recommendations"
-_ACCOUNT_ID = "67d6a0d9c39077bed7e1f23e"
-
-
-def _load_recommendations_from_disk() -> None:
-    if not RECOMMENDATIONS_DIR.exists():
-        return
-    for jf in RECOMMENDATIONS_DIR.glob("*.json"):
-        try:
-            data = json.loads(jf.read_text(encoding="utf-8"))
-            for pe in data.get("PolicyList", []):
-                tag = pe.get("Policy", "")
-                for feat in pe.get("FeatureList", []):
-                    if feat.get("Feature") != "PREVENTIVE_FILTERS_PROTECTION":
-                        continue
-                    for params in feat.get("ParametersList", []):
-                        raw = params.get("rules", [])
-                        if tag and raw:
-                            rules_store.setdefault(tag, []).extend(raw)
-        except Exception as exc:
-            print(f"[simulator] WARNING: {jf.name}: {exc}")
-
-_load_recommendations_from_disk()
+def _cc_set_for(caller_ip: str) -> dict[str, Any] | None:
+    """Return the recommendation set assigned to ``caller_ip`` (primary OR
+    secondary IP), or None. Supports HA: either controller IP matches."""
+    if not caller_ip:
+        return None
+    for s in cc_sets.values():
+        if caller_ip == s.get("cc_ip") or caller_ip == (s.get("secondary_ip") or ""):
+            return s
+    return None
 
 
 class GetRecommendationRequest(BaseModel):
-    tag: str = Field(min_length=1)
+    # A Cyber Controller sends ONLY the destination network(s). Recommendations
+    # are routed by the CALLING CC's IP, which the simulator auto-detects from
+    # the connection. An optional 'cc_ip' may be supplied to override the
+    # detected address (useful for testing tools and behind NAT/proxies).
     networks: list[str] = Field(min_length=1)
+    cc_ip: str | None = None
 
     @field_validator("networks")
     @classmethod
@@ -103,27 +85,6 @@ class GetRecommendationRequest(BaseModel):
             # Each destination must be a valid IPv4/IPv6 subnet (CIDR).
             netvalidate.validate_cidr(n, field="destination network")
         return v
-
-class GenerationConfigRequest(BaseModel):
-    rules_per_network: int = Field(default=3, ge=1, le=50)
-    sourceIPs: list[str] = Field(default_factory=list)
-    sourcePorts: list[str] = Field(default_factory=list)
-    destinationPorts: list[str] = Field(default_factory=list)
-    protocols: list[str] = Field(default_factory=list)
-    tcpFlags: list[str] = Field(default_factory=list)
-    packetSize: list[str] = Field(default_factory=list)
-    sourceGeo: list[str] = Field(default_factory=list)
-    sourceASN: list[str] = Field(default_factory=list)
-    fragment: str = "none"
-    action: str = "allow"
-
-class SeedRequest(BaseModel):
-    tag: str
-    rules: list[dict[str, Any]] = Field(default_factory=list)
-
-class GenerateRequest(BaseModel):
-    tag: str
-    count: int = Field(default=3, ge=1, le=50)
 
 class TemplateRequest(BaseModel):
     enabled: bool = True
@@ -143,14 +104,15 @@ class TemplateUpsertRequest(BaseModel):
 class ScaleRequest(BaseModel):
     destination_network: str = Field(min_length=1)
     count: int = Field(ge=1)
-    mode: str = "dst-seq"                      # dst-seq | src-seq | random
+    mode: str = "dst-seq"          # dst-seq | dst-rand | src-seq | src-rand
     source_network: str | None = None
     host_prefix: int | None = None
     protocol: list[str] = Field(default_factory=list)
     source_ports: list[str] = Field(default_factory=list)
     destination_ports: list[str] = Field(default_factory=list)
     action: str = "allow"
-    tag: str = "scale"
+    cc_ip: str | None = None            # target CC (primary) for generate/assign
+    secondary_ip: str | None = None     # optional HA secondary CC IP
 
 class ConfigureCCRequest(BaseModel):
     cc_host: str = Field(min_length=1)
@@ -179,31 +141,6 @@ def _interval_for_now() -> dict[str, str]:
     return {"start_time": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end_time":   end.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
-def _rule_id(network: str, index: int) -> str:
-    return "rule_" + hashlib.sha256(f"{network}:{index}".encode()).hexdigest()
-
-def _generate(networks: list[str]) -> list[dict[str, Any]]:
-    cfg = generation_config
-    rules = []
-    for net in networks:
-        for i in range(cfg["rules_per_network"]):
-            rules.append({
-                "ruleId": _rule_id(net, i),
-                "sourceIPs": list(cfg["sourceIPs"]),
-                "destinationIPs": [net],
-                "sourcePorts": list(cfg["sourcePorts"]),
-                "destinationPorts": list(cfg["destinationPorts"]),
-                "protocol": list(cfg["protocols"]),
-                "tcpFlags": list(cfg["tcpFlags"]),
-                "packetSize": list(cfg["packetSize"]),
-                "fragment": cfg["fragment"],
-                "sourceGeo": list(cfg["sourceGeo"]),
-                "sourceASN": list(cfg["sourceASN"]),
-                "action": cfg["action"],
-                "status": "success",
-            })
-    return rules
-
 def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "ruleId": raw.get("ruleId", ""),
@@ -214,6 +151,7 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
         "protocol": raw.get("protocol", raw.get("protocols", [])),
         "tcpFlags": raw.get("tcpFlags", []),
         "packetSize": raw.get("packetSize", []),
+        "ttl": raw.get("ttl", []),
         "fragment": raw.get("fragment", raw.get("fragmented", "none") or "none"),
         "sourceGeo": raw.get("sourceGeo", []),
         "sourceASN": raw.get("sourceASN", raw.get("sourceAsn", [])),
@@ -222,32 +160,84 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _learning_rule(net: str) -> dict[str, Any]:
+    """The default response for a destination network that has no configured
+    recommendation yet: a single 'ANY -> dst' rule in the 'learning' state,
+    with a freshly randomized Rule ID. NEVER auto-generates traffic rules."""
+    import secrets
+    return {
+        "ruleId": "rule_" + secrets.token_hex(32),
+        "sourceIPs": [],
+        "destinationIPs": [net],
+        "sourcePorts": [],
+        "destinationPorts": [],
+        "protocol": [],
+        "tcpFlags": [],
+        "packetSize": [],
+        "ttl": [],
+        "fragment": "none",
+        "sourceGeo": [],
+        "sourceASN": [],
+        "action": "allow",
+        "status": "learning",
+    }
+
+
+def _caller_ip(request: GetRecommendationRequest, http: Request) -> str:
+    """The IP used to route recommendations: an explicit override in the body,
+    else the detected source IP of the connection (honoring X-Forwarded-For if
+    the simulator is fronted by a reverse proxy)."""
+    if request.cc_ip and request.cc_ip.strip():
+        return request.cc_ip.strip()
+    xff = http.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return http.client.host if http.client else ""
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/api/sdcc/genai/core/analysis/peacetime/_getRecommendation")
-def get_recommendation(request: GetRecommendationRequest) -> dict[str, Any]:
-    permanent = permanent_rules_for(request.networks)
-    if permanent is not None:
-        rules = permanent
-    else:
-        raw = rules_store.get(request.tag)
-        if raw is not None:
-            rules = [_normalize(r) for r in raw]
-        else:
-            # User-edited templates: dst network always matches the request.
-            # build_rules returns [] when no enabled template matches, so we
-            # fall back to auto-generation in that case.
-            tpl_rules = response_template.build_rules(request.networks)
-            rules = tpl_rules if tpl_rules else _generate(request.networks)
+def get_recommendation(request: GetRecommendationRequest, http: Request) -> dict[str, Any]:
+    """Resolve recommendations per destination network, routed by the calling
+    Cyber Controller's IP. Order per network:
+        1. Permanent pin (shared, by network)
+        2. This CC's assigned set (by CC IP), for its destination network
+        3. Template enabled for the network (shared, by network)
+        4. Otherwise a single 'learning' default rule.
+    No traffic rules are ever auto-generated.
+    """
+    caller = _caller_ip(request, http)
+    cc_set = _cc_set_for(caller)
+    rules: list[dict[str, Any]] = []
+    net_status: list[dict[str, str]] = []
+    for net in request.networks:
+        pinned = permanent_rules_for([net])
+        if pinned:
+            rules.extend(pinned)
+            net_status.append({"subnet": net, "status": "success"})
+            continue
+        if cc_set and net == cc_set.get("destination_network"):
+            rules.extend(cc_set.get("rules", []))
+            net_status.append({"subnet": net, "status": "success"})
+            continue
+        tpl_rules = response_template.build_rules([net])
+        if tpl_rules:
+            rules.extend(tpl_rules)
+            net_status.append({"subnet": net, "status": "success"})
+            continue
+        # Nothing configured for this network -> single learning placeholder.
+        rules.append(_learning_rule(net))
+        net_status.append({"subnet": net, "status": "learning"})
     return {
         "account_id": _ACCOUNT_ID,
         "rules": rules,
         "metadata": {
-            "tag": request.tag,
-            "networks": [{"subnet": n, "status": "success"} for n in request.networks],
+            "tag": "",
+            "networks": net_status,
             "interval": _interval_for_now(),
         },
         "timestamp": _iso_now(),
@@ -386,7 +376,7 @@ def remove_template(template_id: str) -> dict[str, Any]:
     return {"removed": template_id}
 
 
-# --- Scale testing: generate many unique recommendations --------------------
+# --- Scale testing: generate many unique recommendations, assigned to a CC --
 def _spec_from_request(body: ScaleRequest, *, max_count: int | None = None) -> dict[str, Any]:
     try:
         return netgen.build_spec(
@@ -399,11 +389,22 @@ def _spec_from_request(body: ScaleRequest, *, max_count: int | None = None) -> d
             source_ports=body.source_ports,
             destination_ports=body.destination_ports,
             action=body.action,
-            tag=body.tag,
             max_count=max_count,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _validate_ip(value: str, field: str) -> str:
+    import ipaddress
+    s = (value or "").strip()
+    if not s:
+        raise HTTPException(status_code=400, detail=f"{field} is required.")
+    try:
+        ipaddress.ip_address(s)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field} '{s}' is not a valid IP address.")
+    return s
 
 
 @app.post("/ui/scale/preview")
@@ -433,29 +434,45 @@ def scale_preview(body: ScaleRequest) -> dict[str, Any]:
 
 @app.post("/ui/scale/generate")
 def scale_generate(body: ScaleRequest) -> dict[str, Any]:
-    """Materialize a scale set and serve it under ``tag`` via _getRecommendation.
+    """Materialize a scale set and ASSIGN it to a Cyber Controller by IP.
 
-    Bounded by SCALE_MAX_SERVE to protect memory; for larger sets use the
-    streaming download instead.
+    The set is served to that CC (primary or secondary IP) when it requests the
+    set's destination network. One set per CC (this replaces any previous set
+    for the same primary IP). Bounded by SCALE_MAX_SERVE to protect memory.
     """
+    cc_ip = _validate_ip(body.cc_ip or "", "CC IP")
+    secondary = None
+    if body.secondary_ip and body.secondary_ip.strip():
+        secondary = _validate_ip(body.secondary_ip, "Secondary CC IP")
+        if secondary == cc_ip:
+            raise HTTPException(status_code=400,
+                                detail="Secondary CC IP must differ from the primary CC IP.")
     spec = _spec_from_request(body, max_count=SCALE_MAX_SERVE)
     rules = list(netgen.iter_rules(spec))
-    rules_store[spec["tag"]] = rules
-    scale_specs[spec["tag"]] = spec
-    # Sanity: confirm there are no duplicate destination/source pairs.
+    cc_sets[cc_ip] = {
+        "cc_ip": cc_ip,
+        "secondary_ip": secondary,
+        "destination_network": spec["destination_network"],
+        "mode": spec["mode"],
+        "count": len(rules),
+        "created_at": _iso_now(),
+        "rules": rules,
+    }
     dst_seen = {tuple(r["destinationIPs"]) for r in rules}
     src_seen = {tuple(r["sourceIPs"]) for r in rules}
     unique_ids = len({r["ruleId"] for r in rules}) == len(rules)
+    ha = f" (or secondary {secondary})" if secondary else ""
     return {
         "generated": len(rules),
-        "tag": spec["tag"],
+        "cc_ip": cc_ip,
+        "secondary_ip": secondary,
+        "destination_network": spec["destination_network"],
         "mode": spec["mode"],
         "unique_rule_ids": unique_ids,
         "unique_destinations": len(dst_seen),
         "unique_sources": len(src_seen),
-        "served_at_tag": spec["tag"],
-        "hint": f"A Cyber Controller querying tag '{spec['tag']}' now receives "
-                f"{len(rules)} rules. Use Download for larger sets.",
+        "hint": f"Cyber Controller {cc_ip}{ha} now receives {len(rules)} rules when "
+                f"it requests {spec['destination_network']}. Use Download for larger sets.",
     }
 
 
@@ -465,19 +482,43 @@ def scale_download(body: ScaleRequest) -> StreamingResponse:
     spec = _spec_from_request(body, max_count=SCALE_MAX_DOWNLOAD)
 
     def _stream() -> Iterator[str]:
-        head = {"tag": spec["tag"], "mode": spec["mode"], "count": spec["count"]}
-        yield '{"tag": %s, "mode": %s, "count": %d, "rules": [' % (
-            json.dumps(head["tag"]), json.dumps(head["mode"]), head["count"])
+        yield '{"destination_network": %s, "mode": %s, "count": %d, "rules": [' % (
+            json.dumps(spec["destination_network"]), json.dumps(spec["mode"]), spec["count"])
         first = True
         for rule in netgen.iter_rules(spec):
             yield ("" if first else ",") + json.dumps(rule)
             first = False
         yield "]}"
 
-    fname = f"scale_{spec['tag']}_{spec['mode']}_{spec['count']}.json"
+    fname = f"scale_{spec['destination_network'].replace('/', '-')}_{spec['mode']}_{spec['count']}.json"
     return StreamingResponse(
         _stream(), media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.get("/ui/cc-sets")
+def list_cc_sets() -> dict[str, Any]:
+    """List the recommendation sets assigned to Cyber Controllers (summaries)."""
+    out = []
+    for s in cc_sets.values():
+        out.append({
+            "cc_ip": s["cc_ip"],
+            "secondary_ip": s.get("secondary_ip"),
+            "destination_network": s["destination_network"],
+            "mode": s["mode"],
+            "count": s["count"],
+            "created_at": s.get("created_at", ""),
+            "sample": s["rules"][:5],
+        })
+    return {"cc_sets": out}
+
+
+@app.delete("/ui/cc-sets/{cc_ip}")
+def delete_cc_set(cc_ip: str) -> dict[str, Any]:
+    if cc_ip not in cc_sets:
+        raise HTTPException(status_code=404, detail=f"No recommendation set assigned to CC '{cc_ip}'")
+    del cc_sets[cc_ip]
+    return {"removed": cc_ip}
 
 
 # --- Tab 3: browse existing recommendations ---------------------------------
@@ -487,7 +528,7 @@ def list_recommendations() -> dict[str, Any]:
 
     - 'template':  every editable template (Tab 2) that currently has rules
     - 'permanent': pinned per-network responses (permanent_responses.py)
-    - 'seeded':    tag-based rule sets loaded from recommendations/ or /admin/seed
+    - 'cc':        per-CC generated sets (assigned by CC IP)
     """
     template_group = []
     for tpl in response_template.list_templates():
@@ -508,12 +549,17 @@ def list_recommendations() -> dict[str, Any]:
          "count": len(rules), "rules": rules}
         for net, rules in PERMANENT_NETWORK_RULES.items()
     ]
-    seeded = [
-        {"kind": "seeded", "key": tag, "networks": [],
-         "count": len(rules), "rules": [_normalize(r) for r in rules]}
-        for tag, rules in rules_store.items()
-    ]
-    return {"groups": template_group + permanent + seeded}
+    cc_group = []
+    for s in cc_sets.values():
+        ha = f" + {s['secondary_ip']}" if s.get("secondary_ip") else ""
+        cc_group.append({
+            "kind": "cc",
+            "key": f"CC {s['cc_ip']}{ha} \u2014 {s['destination_network']} ({s['mode']})",
+            "networks": [s["destination_network"]],
+            "count": s["count"],
+            "rules": s["rules"][:50],  # sample only; sets can be very large
+        })
+    return {"groups": template_group + permanent + cc_group}
 
 
 # --- Tab 1: Cyber Controller configuration ----------------------------------
@@ -570,52 +616,3 @@ def reset_cc(body: ResetCCRequest) -> dict[str, Any]:
         ssh_port=body.ssh_port,
         restart=body.restart,
     )
-
-
-@app.get("/ui/config")
-def get_config() -> dict[str, Any]:
-    return dict(generation_config)
-
-@app.post("/ui/config")
-def set_config(body: GenerationConfigRequest) -> dict[str, Any]:
-    generation_config["rules_per_network"] = body.rules_per_network
-    generation_config["sourceIPs"] = body.sourceIPs
-    generation_config["sourcePorts"] = body.sourcePorts
-    generation_config["destinationPorts"] = body.destinationPorts
-    if body.protocols:      generation_config["protocols"] = body.protocols
-    generation_config["tcpFlags"] = body.tcpFlags
-    if body.packetSize:     generation_config["packetSize"] = body.packetSize
-    if body.sourceGeo:      generation_config["sourceGeo"] = body.sourceGeo
-    if body.sourceASN:      generation_config["sourceASN"] = body.sourceASN
-    generation_config["fragment"] = body.fragment
-    generation_config["action"] = body.action
-    return {"saved": True, "config": dict(generation_config)}
-
-@app.post("/ui/generate")
-def generate_preview(body: GenerateRequest) -> dict[str, Any]:
-    old = generation_config["rules_per_network"]
-    generation_config["rules_per_network"] = body.count
-    rules = _generate(["<network-from-request>"])
-    generation_config["rules_per_network"] = old
-    return {"tag": body.tag, "rules": rules}
-
-@app.get("/admin/tags")
-def list_tags() -> dict[str, Any]:
-    return {tag: len(rules) for tag, rules in rules_store.items()}
-
-@app.post("/admin/reload")
-def reload_from_disk() -> dict[str, Any]:
-    rules_store.clear(); _load_recommendations_from_disk()
-    return {"loaded_tags": list(rules_store.keys())}
-
-@app.post("/admin/seed", status_code=201)
-def seed_rules(body: SeedRequest) -> dict[str, Any]:
-    rules_store[body.tag] = body.rules
-    return {"seeded": body.tag, "rule_count": len(body.rules)}
-
-@app.delete("/admin/seed/{tag}")
-def clear_seed(tag: str) -> dict[str, str]:
-    if tag not in rules_store:
-        raise HTTPException(status_code=404, detail=f"No seed found for tag '{tag}'")
-    del rules_store[tag]
-    return {"cleared": tag}

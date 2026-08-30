@@ -200,10 +200,10 @@ th{color:#1a3c5e}
         <button class="sec small" style="float:right" onclick="loadRecs()" title="Reload the list of existing recommendations">&#128260; Refresh</button>
       </h2>
       <p class="sub">
-        Browse existing rule sets: your current <b>Template</b> (Tab 2), the pinned
-        per-network responses, and any seeded tags. Use <b>View JSON</b> to inspect
-        a set, or <b>Copy to Template</b> to load it into the Template tab as a
-        starting point (the destination is re-matched to each request automatically).
+        Browse existing rule sets: your <b>Templates</b> (Tab 2), the pinned
+        per-network responses, and the <b>per-CC generated sets</b> (Scale test).
+        Use <b>View JSON</b> to inspect a set, or <b>Copy to Template</b> to load
+        it into the Template tab as a starting point.
       </p>
       <div id="rec_list">Loading&hellip;</div>
     </div>
@@ -214,24 +214,34 @@ th{color:#1a3c5e}
     <div class="card">
       <h2>&#128200; Scale test generator</h2>
       <p class="sub">
-        Generate a large number of <b>unique</b> recommendations for a destination
-        network. Rule IDs are always random; there are never duplicate rules.
+        Generate a large number of <b>unique</b> recommendations and assign them
+        to a <b>Cyber Controller (by IP)</b>. That CC receives them automatically
+        when it requests the destination network &mdash; it sends only the network,
+        the simulator recognizes the CC by its IP. Rule IDs are always random and
+        there are never duplicate rules.
       </p>
       <div class="callout">
         <b>Modes</b> &mdash; how the varying IP is produced:<br>
-        &bull; <b>Increment destination IP</b> &mdash; the DST address counts up through the destination network (source fixed).<br>
-        &bull; <b>Increment source IP</b> &mdash; the SRC address counts up through the source network (destination fixed).<br>
-        &bull; <b>Random source IP</b> &mdash; the SRC address is picked at random, without repeats (destination fixed).
+        &bull; <b>Increment destination IP</b> &mdash; the DST counts up through the destination network (source fixed).<br>
+        &bull; <b>Random destination IP</b> &mdash; the DST is picked at random, no repeats, from the destination network (source fixed).<br>
+        &bull; <b>Increment source IP</b> &mdash; the SRC counts up through the source network (destination fixed).<br>
+        &bull; <b>Random source IP</b> &mdash; the SRC is picked at random, no repeats, from the source network (destination fixed).
+      </div>
+      <div class="row">
+        <div class="f"><label>Cyber Controller IP (primary)</label><input id="sc_cc" placeholder="10.205.50.10"><p class="hint">The CC these recommendations are for. One set per CC.</p></div>
+        <div class="f"><label>Secondary CC IP (optional, HA)</label><input id="sc_cc2" placeholder="10.205.50.11"><p class="hint">For high-availability pairs &mdash; either controller matches.</p></div>
       </div>
       <label>Destination network (CIDR, IPv4 or IPv6)</label>
-      <input id="sc_dst" placeholder="10.9.0.0/16  or  2001:db8::/48">
+      <input id="sc_dst" placeholder="4.4.4.0/24  or  2001:db8::/48">
+      <p class="hint">The network the CC will request. Also the pool for destination modes.</p>
       <div class="row">
         <div class="f"><label>How many recommendations</label><input id="sc_count" type="number" min="1" value="1000"></div>
         <div class="f"><label>Mode</label>
           <select id="sc_mode" onchange="scaleModeChanged()">
             <option value="dst-seq">Increment destination IP</option>
+            <option value="dst-rand">Random destination IP</option>
             <option value="src-seq">Increment source IP</option>
-            <option value="random">Random source IP</option>
+            <option value="src-rand">Random source IP</option>
           </select>
         </div>
       </div>
@@ -248,14 +258,13 @@ th{color:#1a3c5e}
           <div class="f"><label>Destination ports (csv)</label><input id="sc_dport" placeholder="80,443"></div>
         </div>
         <div class="row">
-          <div class="f"><label>Serve under tag</label><input id="sc_tag" value="scale-test"></div>
-          <div class="f"><label>Action</label>
+          <div class="f" style="max-width:170px"><label>Action</label>
             <select id="sc_action"><option value="allow">allow</option><option value="block">block</option></select>
           </div>
         </div>
       </details>
       <button class="sec" onclick="scalePreview()" title="Validate and preview a small sample without generating everything">&#9654; Preview</button>
-      <button onclick="scaleGenerate()" title="Generate and serve the set under the tag so a CC receives them">&#9889; Generate &amp; serve</button>
+      <button onclick="scaleGenerate()" title="Generate the set and assign it to the Cyber Controller IP so it receives them">&#9889; Generate &amp; assign to CC</button>
       <button class="sec" onclick="scaleDownload()" title="Download the full set as a JSON file (streamed, memory-safe)">&#11015; Download JSON</button>
       <div id="sc_out" style="display:none"><label>Result</label><pre class="log" id="sc_log"></pre></div>
     </div>
@@ -580,11 +589,11 @@ document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id
 /* ---------- Tab 4: scale test ---------- */
 function scaleModeChanged(){
   const mode=document.getElementById("sc_mode").value;
-  const needsSrc=(mode==="src-seq"||mode==="random");
+  const needsSrc=(mode==="src-seq"||mode==="src-rand");
   document.getElementById("sc_srcreq").textContent=needsSrc?"(required)":"";
   document.getElementById("sc_srchint").textContent=needsSrc
     ? "The varying source address is drawn from this network."
-    : "Optional: the fixed source address for each rule (defaults to 10.0.0.0/8).";
+    : "Optional: the fixed source address for each rule (blank = none).";
 }
 function scaleBody(){
   const b={
@@ -593,7 +602,8 @@ function scaleBody(){
     mode:document.getElementById("sc_mode").value,
     source_network:document.getElementById("sc_src").value.trim()||null,
     action:document.getElementById("sc_action").value,
-    tag:document.getElementById("sc_tag").value.trim()||"scale-test",
+    cc_ip:document.getElementById("sc_cc").value.trim()||null,
+    secondary_ip:document.getElementById("sc_cc2").value.trim()||null,
     protocol:csv(document.getElementById("sc_proto").value),
     destination_ports:csv(document.getElementById("sc_dport").value)
   };
@@ -601,9 +611,10 @@ function scaleBody(){
   if(!isNaN(hp))b.host_prefix=hp;
   return b;
 }
-function scaleValid(b){
+function scaleValid(b,{needCC=false}={}){
   if(!b.destination_network){toast("Destination network is required",false);return false;}
   if(!b.count||b.count<1){toast("Enter how many recommendations (>= 1)",false);return false;}
+  if(needCC&&!b.cc_ip){toast("Cyber Controller IP is required to assign the set",false);return false;}
   return true;
 }
 function scaleShow(text){const w=document.getElementById("sc_out"),l=document.getElementById("sc_log");w.style.display="block";l.textContent=text;}
@@ -619,25 +630,27 @@ async function scalePreview(){
     "Mode: "+d.mode+"\n"+
     "Will generate: "+d.count.toLocaleString()+" unique recommendations\n"+
     "Address capacity available: "+d.capacity.toLocaleString()+" (/"+d.host_prefix+")\n"+
-    "Destination: "+d.destination_network+"   Source: "+d.source_network+"\n"+
+    "Destination: "+d.destination_network+"   Source: "+(d.source_network||"(none)")+"\n"+
     "Estimated payload: ~"+(mb>=1?mb.toFixed(1)+" MB":Math.round(d.estimated_bytes/1024)+" KB")+"\n"+
     "Serve limit (in-memory): "+d.serve_limit.toLocaleString()+"   Download limit: "+d.download_limit.toLocaleString()+"\n\n"+
     "Sample (first "+d.sample.length+"):\n"+JSON.stringify(d.sample,null,2));
   toast("Preview ready");
 }
 async function scaleGenerate(){
-  const b=scaleBody();if(!scaleValid(b))return;
-  scaleShow("Generating "+b.count.toLocaleString()+" recommendations\u2026");
+  const b=scaleBody();if(!scaleValid(b,{needCC:true}))return;
+  scaleShow("Generating "+b.count.toLocaleString()+" recommendations for CC "+b.cc_ip+"\u2026");
   const r=await fetch("/ui/scale/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
   const d=await readJson(r);
   if(!r.ok){scaleShow("\u274C "+(d.detail||"Generation failed"));toast("Generation failed",false);return;}
   scaleShow(
     "\u2705 Generated "+d.generated.toLocaleString()+" recommendations.\n"+
+    "Assigned to CC: "+d.cc_ip+(d.secondary_ip?(" (secondary "+d.secondary_ip+")"):"")+"\n"+
+    "Destination network: "+d.destination_network+"\n"+
     "Mode: "+d.mode+"\n"+
     "Unique Rule IDs: "+d.unique_rule_ids+"\n"+
     "Unique destinations: "+d.unique_destinations.toLocaleString()+"\n"+
     "Unique sources: "+d.unique_sources.toLocaleString()+"\n\n"+d.hint);
-  toast("Generated & served under tag '"+d.tag+"'");
+  toast("Assigned to CC "+d.cc_ip);
 }
 async function scaleDownload(){
   const b=scaleBody();if(!scaleValid(b))return;
@@ -648,7 +661,7 @@ async function scaleDownload(){
     const blob=await r.blob();
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
-    a.href=url;a.download="scale_"+b.tag+"_"+b.mode+"_"+b.count+".json";
+    a.href=url;a.download="scale_"+b.destination_network.replace(/\//g,"-")+"_"+b.mode+"_"+b.count+".json";
     document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
     scaleShow("\u2705 Download started ("+b.count.toLocaleString()+" recommendations).");
     toast("Download started");

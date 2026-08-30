@@ -3,13 +3,15 @@
 Produces a large number of *unique* recommendations for a destination network,
 for load/scale testing the Cyber Controller -> ADE pipeline.
 
-Three generation modes control how the varying IP address is produced:
+Four generation modes control how the varying IP address is produced:
 
     "dst-seq"  : the DESTINATION IP increments sequentially through the
-                 destination network; the source is fixed.
+                 destination network; the source is fixed (optional).
+    "dst-rand" : the DESTINATION IP is drawn at random (without replacement)
+                 from the destination network; the source is fixed (optional).
     "src-seq"  : the SOURCE IP increments sequentially through the source
                  network; the destination is fixed (the destination network).
-    "random"   : the SOURCE IP is drawn at random (without replacement) from
+    "src-rand" : the SOURCE IP is drawn at random (without replacement) from
                  the source network; the destination is fixed.
 
 Guarantees
@@ -31,8 +33,9 @@ from typing import Any, Iterator
 
 import netvalidate
 
-MODES = ("dst-seq", "src-seq", "random")
-DEFAULT_SOURCE = "10.0.0.0/8"
+MODES = ("dst-seq", "dst-rand", "src-seq", "src-rand")
+_DST_MODES = ("dst-seq", "dst-rand")
+_SRC_MODES = ("src-seq", "src-rand")
 # Above this capacity we cannot call random.sample(range(n), k) because
 # len(range(n)) overflows a C ssize_t; fall back to rejection sampling instead.
 _SAMPLE_RANGE_LIMIT = 1 << 31
@@ -69,8 +72,6 @@ def build_spec(
     source_ports: list[str] | None = None,
     destination_ports: list[str] | None = None,
     action: str = "allow",
-    tag: str = "scale",
-    seed: int | None = None,
     max_count: int | None = None,
 ) -> dict[str, Any]:
     """Validate inputs and return a normalized, ready-to-expand spec.
@@ -87,23 +88,27 @@ def build_spec(
             f"Reduce the count or use the streaming download for larger sets."
         )
 
-    # Destination is always required and must be a CIDR (IPv4 or IPv6).
+    # Destination is always required and must be a CIDR (IPv4 or IPv6). It is
+    # also the KEY a Cyber Controller matches on, so it is kept verbatim.
     dst = netvalidate.parse_network(destination_network, field="destination network")
+    dst_str = netvalidate.validate_cidr(destination_network, field="destination network")
 
-    # Source: required for source-varying modes; defaulted for dst-seq.
-    if mode in ("src-seq", "random"):
+    src_str = ""
+    src = None
+    if mode in _SRC_MODES:
         if not source_network:
             raise ValueError(
-                f"source network is required for mode '{mode}' "
-                "(e.g. 10.0.0.0/8)."
+                f"source network is required for mode '{mode}' (e.g. 10.0.0.0/8)."
             )
         src = netvalidate.parse_network(source_network, field="source network")
-    else:
-        src = netvalidate.parse_network(source_network or DEFAULT_SOURCE,
-                                        field="source network")
+        src_str = netvalidate.validate_cidr(source_network, field="source network")
+    elif source_network:
+        # Optional fixed source for destination-varying modes.
+        src = netvalidate.parse_network(source_network, field="source network")
+        src_str = netvalidate.validate_cidr(source_network, field="source network")
 
-    # The address family being incremented/sampled determines default host mask.
-    vary = dst if mode == "dst-seq" else src
+    # The address family being incremented/sampled determines the host mask.
+    vary = dst if mode in _DST_MODES else src
     if host_prefix is None:
         host_prefix = vary.max_prefixlen
     if not (vary.prefixlen <= host_prefix <= vary.max_prefixlen):
@@ -114,7 +119,7 @@ def build_spec(
 
     cap = capacity(str(vary), host_prefix)
     if count > cap:
-        axis = "destination" if mode == "dst-seq" else "source"
+        axis = "destination" if mode in _DST_MODES else "source"
         raise ValueError(
             f"count {count} exceeds the {cap} available /{host_prefix} "
             f"addresses in the {axis} network {vary}. "
@@ -122,20 +127,17 @@ def build_spec(
         )
 
     return {
-        "tag": tag or "scale",
         "mode": mode,
         "count": count,
         "host_prefix": host_prefix,
-        "destination_network": netvalidate.validate_cidr(
-            destination_network, field="destination network"),
-        "source_network": netvalidate.validate_cidr(
-            source_network or DEFAULT_SOURCE, field="source network"),
+        "destination_network": dst_str,
+        "source_network": src_str,          # "" when no fixed source
         "protocol": list(protocol) if protocol else ["6", "17"],
         "source_ports": list(source_ports) if source_ports else [],
         "destination_ports": list(destination_ports) if destination_ports else [],
         "action": action or "allow",
         "capacity": cap,
-        "seed": seed if seed is not None else secrets.randbits(64),
+        "seed": secrets.randbits(64),
     }
 
 
@@ -149,6 +151,7 @@ def _rule(source: list[str], destination: list[str], spec: dict[str, Any]) -> di
         "protocol": list(spec["protocol"]),
         "tcpFlags": [],
         "packetSize": [],
+        "ttl": [],
         "fragment": "none",
         "sourceGeo": [],
         "sourceASN": [],
@@ -178,20 +181,24 @@ def iter_rules(spec: dict[str, Any]) -> Iterator[dict[str, Any]]:
     count = spec["count"]
     hp = spec["host_prefix"]
     dst_net = ipaddress.ip_network(spec["destination_network"], strict=False)
-    src_net = ipaddress.ip_network(spec["source_network"], strict=False)
+    src_fixed = [spec["source_network"]] if spec["source_network"] else []
 
     if mode == "dst-seq":
-        src_fixed = [spec["source_network"]]
         for i in range(count):
             yield _rule(list(src_fixed), [_block(dst_net, hp, i)], spec)
-    elif mode == "src-seq":
-        dst_fixed = [spec["destination_network"]]
-        for i in range(count):
-            yield _rule([_block(src_net, hp, i)], list(dst_fixed), spec)
-    else:  # random -> random distinct source IPs, fixed destination
-        dst_fixed = [spec["destination_network"]]
+    elif mode == "dst-rand":
         for i in _random_indices(spec["capacity"], count, spec["seed"]):
-            yield _rule([_block(src_net, hp, i)], list(dst_fixed), spec)
+            yield _rule(list(src_fixed), [_block(dst_net, hp, i)], spec)
+    else:
+        # source-varying modes: destination fixed to the destination network
+        src_net = ipaddress.ip_network(spec["source_network"], strict=False)
+        dst_fixed = [spec["destination_network"]]
+        if mode == "src-seq":
+            for i in range(count):
+                yield _rule([_block(src_net, hp, i)], list(dst_fixed), spec)
+        else:  # src-rand
+            for i in _random_indices(spec["capacity"], count, spec["seed"]):
+                yield _rule([_block(src_net, hp, i)], list(dst_fixed), spec)
 
 
 def sample_rules(spec: dict[str, Any], n: int = 5) -> list[dict[str, Any]]:
@@ -202,4 +209,6 @@ def sample_rules(spec: dict[str, Any], n: int = 5) -> list[dict[str, Any]]:
         if len(out) >= n:
             break
     return out
+
+
 

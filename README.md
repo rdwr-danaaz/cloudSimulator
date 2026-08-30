@@ -64,13 +64,19 @@ docker compose up --build
 # HTTPS on https://localhost:8080/health  (self-signed cert)
 ```
 
-Sample request:
+Sample request (a Cyber Controller sends only the destination network(s)):
 
 ```bash
 curl -k -X POST https://localhost:8080/api/sdcc/genai/core/analysis/peacetime/_getRecommendation \
   -H "Content-Type: application/json" \
-  -d '{"tag":"test","networks":["100.98.89.0/24"]}'
+  -d '{"networks":["100.98.89.0/24"]}'
 ```
+
+Recommendations are routed by the **calling CC's IP** (auto-detected from the
+connection; an optional `"cc_ip"` may be supplied to override it for testing).
+For a destination network with nothing configured, the response is a single
+`learning` rule (ANY → that network) with a random `ruleId`; no traffic rules
+are ever auto-generated.
 
 ## Web UI (`/ui`)
 
@@ -103,10 +109,60 @@ request. All other fields are optional, but blank `fragment`/`action` default to
 `none`/`allow` (ADE rejects null values). Use **Preview** to see the exact
 response a CC would receive. State is persisted under `data/` (docker volume).
 
-**Tab 3 — Recommendations.** Browse every existing rule set — the pinned
-per-network responses and any seeded tags — in a friendly table. **View JSON**
-opens a full JSON viewer (with copy), and **Copy to Template** loads a set into
-Tab 2 as a starting point (the destination is re-matched per request).
+**Tab 3 — Recommendations.** Browse every existing rule set — your **Templates**,
+the pinned per-network responses, and the **per-CC generated sets** (from the
+Scale test tab) — in a friendly table. **View JSON** opens a full JSON viewer
+(with copy), and **Copy to Template** loads a set into Tab 2 as a starting point.
+
+**Tab 4 — Scale test.** Generate a large number of **unique** recommendations
+and **assign them to a Cyber Controller by IP**. You enter the **CC IP (primary)**
+and an optional **secondary CC IP** (for HA primary/secondary pairs — either
+controller matches the same set), the **destination network** (the network that
+CC will request), a **count**, and a **mode**:
+
+- **Increment destination IP** (`dst-seq`) — the destination counts up through the destination network; source fixed.
+- **Random destination IP** (`dst-rand`) — the destination is sampled at random (no repeats) from the destination network; source fixed.
+- **Increment source IP** (`src-seq`) — the source counts up through the source network; destination fixed.
+- **Random source IP** (`src-rand`) — the source is sampled at random (no repeats) from the source network; destination fixed.
+
+All networks are validated as CIDR (IPv4 **or** IPv6, subnet required, e.g.
+`4.4.4.0/24` or `2001:db8::/48`); an invalid address or a count that exceeds the
+address space returns a clear error. There are **never duplicate rules**, and the
+**Rule ID is always randomly generated**. **Preview** validates and shows a small
+sample + capacity. **Generate & assign to CC** stores the set for that CC so it is
+served automatically when the CC requests the destination network (one set per
+CC; regenerating replaces it). **Download JSON** streams the full set to a file.
+
+### How recommendations are routed to a CC
+
+A Cyber Controller sends **only the destination network(s)**. Per requested
+network, the simulator resolves the response in this order:
+
+1. **Permanent** pin for that network (shared, unlimited).
+2. This **CC's assigned set** (matched by the caller's IP — primary or secondary).
+3. A **Template** enabled for that network (shared, unlimited).
+4. Otherwise a single **`learning`** rule (ANY → the network, random `ruleId`).
+
+The calling CC is identified by its source IP (auto-detected from the
+connection, honoring `X-Forwarded-For` behind a proxy; an optional `"cc_ip"` in
+the request overrides it). This lets **different CCs receive different
+recommendations for the same destination network** — ideal for per-CC scale
+testing — while templates and permanent pins remain shared across all CCs.
+
+### Scale testing — resources & architecture
+
+No architecture change is required for typical scale tests. Guidance:
+
+- **Streaming download** builds rules lazily and never holds the whole set in
+  memory, so it scales to millions of rules on the default box.
+- **Generate & assign** (in-memory, served via `_getRecommendation`) is bounded
+  by `SCALE_MAX_SERVE` (default 50 000 ≈ ~15 MB per CC set). Raise it only if the
+  box has spare RAM (budget ~0.5 KB × count, plus response headroom).
+- For **very large served sets**, give the container more memory (`mem_limit` in
+  `docker-compose.yml`) or prefer the streaming download. Generation is linear
+  and fast; CPU is not the bottleneck.
+- Both limits are environment variables (`SCALE_MAX_SERVE`, `SCALE_MAX_DOWNLOAD`)
+  so you can tune them per host without code changes.
 
 ## Install on a standalone Linux machine (step by step)
 
