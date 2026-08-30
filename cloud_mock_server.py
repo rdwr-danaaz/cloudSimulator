@@ -88,7 +88,7 @@ class GetRecommendationRequest(BaseModel):
 
 class TemplateRequest(BaseModel):
     enabled: bool = True
-    networks: list[str] = Field(default_factory=lambda: ["100.98.10.0/24"])
+    networks: list[str] = Field(default_factory=list)  # empty = catch-all
     rules: list[dict[str, Any]] = Field(default_factory=list)
 
 class TemplatePreviewRequest(BaseModel):

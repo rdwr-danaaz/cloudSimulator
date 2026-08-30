@@ -235,12 +235,12 @@ def _matching_templates_locked(network: str) -> list[dict[str, Any]]:
     for t in _templates:
         if not t.get("enabled") or not t.get("rules"):
             continue
-        # The legacy "default" template is always a catch-all (it applies to any
-        # request), preserving the historical single-template behavior. Named
-        # templates match a request only when they have no networks (catch-all)
-        # or explicitly list the requested network.
+        # A template matches a request when it has no networks (an explicit
+        # catch-all) or explicitly lists the requested network. Templates with a
+        # non-empty network list only match those networks, so an unconfigured
+        # network falls through to the caller's 'learning' default.
         nets = t.get("networks") or []
-        if t.get("id") == _DEFAULT_ID or not nets or network in nets:
+        if not nets or network in nets:
             out.append(t)
     return out
 def build_rules(networks: list[str]) -> list[dict[str, Any]]:
@@ -272,3 +272,4 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
                     rule["status"] = "success"
                     out.append(rule)
     return out
+
