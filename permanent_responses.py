@@ -16,7 +16,7 @@ from typing import Any
 PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
     "100.98.89.0/24": [
         {
-            "ruleId": "rule_a16b788c7f285d8c95ad333f6eb07fc3752637cc58c9d4f959c8cd5f9c738983",
+            "ruleId": "rule_062b76f5771aef1b28699e2828df26b9b5de2927cecb003744d4b0b8ce2b1fa5",
             "sourceIPs": ["5.83.149.1/32"],
             "destinationIPs": ["100.98.89.100/32"],
             "sourcePorts": [],
@@ -32,7 +32,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_40c8a21c18406f19f27560a56aafca9c66fb837780f80202944a53d469d68147",
+            "ruleId": "rule_021a90b54a6834fab32023ab4d81e0376028c0516df74841021091b76ba31199",
             "sourceIPs": ["5.101.86.1/32"],
             "destinationIPs": ["100.98.89.101/32", "100.98.89.2/32"],
             "sourcePorts": [],
@@ -48,7 +48,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_c58a3ae637f18a0c450a9c94a85dd004e198a12d2703ad1a86c6771ea2750318",
+            "ruleId": "rule_86dc85a80dcdb72ce43458319fd9b26a9310ee56a34297a72a37c9b47aee3b58",
             "sourceIPs": ["5.101.96.1/32"],
             "destinationIPs": ["100.98.89.102/32", "100.98.89.3/32"],
             "sourcePorts": [],
@@ -64,7 +64,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_59c6875a08f685c1c0d6a5a0f839b0fdeb04ad77c047d679227b7a0e1f827048",
+            "ruleId": "rule_c4f9d17df7eead7486f81a3e44fe750745cc903daa22ac580b18b62178580c2f",
             "sourceIPs": [],
             "destinationIPs": ["100.98.89.0/24"],
             "sourcePorts": ["1024"],
@@ -80,7 +80,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_33ff47ddcdd5e537168d6a450051ea5d49e71502e81fbc1e4a8dd484257651db",
+            "ruleId": "rule_f527428259a1d2df263511968b4446a64af8e0a8dbc6a503e2c34dedd86838ad",
             "sourceIPs": [],
             "destinationIPs": ["100.98.89.0/24"],
             "sourcePorts": ["80"],
@@ -96,7 +96,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_3c2b65ae7c4cc3a10bacf42b25de89e7ab4d1a1aa8e32a9c6488b82b45b3980b",
+            "ruleId": "rule_31c6da3327bfbe06902ad85a1dc7626b5e982591d8e4ede42dbadda092a0e58c",
             "sourceIPs": [],
             "destinationIPs": ["100.98.89.1/32"],
             "sourcePorts": [],
@@ -112,7 +112,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_b12d739cd4270dfe49e7d8af4426e720d086f6794a2bebeb819d6103817780d4",
+            "ruleId": "rule_54b86f34dc6c45740870925f65fbc5ca3ac5b6a82366ebe52825ad724a79ecb4",
             "sourceIPs": ["5.83.149.1/32"],
             "destinationIPs": ["100.98.89.1/32"],
             "sourcePorts": [],
@@ -130,7 +130,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
     ],
     "100.98.86.0/24": [
         {
-            "ruleId": "rule_bdbe6ece1d09197de70fa687feca52da72273d18992f24edc3aef11f4191fe88",
+            "ruleId": "rule_d039849c22a159dedfe77cab674f90e80b53661a880610e5548c53599f7b03cc",
             "sourceIPs": ["5.83.149.1/32"],
             "destinationIPs": ["100.98.86.5/32"],
             "sourcePorts": [],
@@ -146,7 +146,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_7a28f3559e4f94d7a28c7eb00a08991c2832abbc320d3ac8fe77dce27aadc999",
+            "ruleId": "rule_ab41ccce8d93c819b035c65a620f80397cedd2c6d15759e8c8452ea8ed8ed157",
             "sourceIPs": [],
             "destinationIPs": ["100.98.86.1/32"],
             "sourcePorts": ["1024-1031"],
@@ -162,7 +162,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_2671cf8d65fc128c1379512c3cb8fec56f36171c5b86d4b0095ee785e205872a",
+            "ruleId": "rule_94e5f7d1818e25c980a5bc7c536f1c124c42358135da6976e4f45d3ca6108947",
             "sourceIPs": ["5.101.96.1/32"],
             "destinationIPs": ["100.98.86.7/32"],
             "sourcePorts": [],
@@ -178,7 +178,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_dd8e4dacafb16e36417c51550297602ecc125674d2c725ce6a9108cc922bcf84",
+            "ruleId": "rule_b3999b9986ea5e94be3192a2a62f3b68120ad2bf917ff1bd33011c170a520f7f",
             "sourceIPs": ["5.101.86.1/32"],
             "destinationIPs": ["100.98.86.6/32"],
             "sourcePorts": [],
@@ -196,7 +196,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
     ],
     "100.98.85.0/24": [
         {
-            "ruleId": "rule_8885943bb67c9e1459d2fc7c20dd09539f056550c9e076015c95ff66b85dccba",
+            "ruleId": "rule_cd48d808cad14fdd03ebe8ae8712e46df0b0f9f46b13f0c3b9cfd5525119745c",
             "sourceIPs": [],
             "destinationIPs": ["100.98.85.0/24"],
             "sourcePorts": ["8080"],
@@ -212,7 +212,7 @@ PERMANENT_NETWORK_RULES: dict[str, list[dict[str, Any]]] = {
             "status": "success",
         },
         {
-            "ruleId": "rule_f3c5c2c7356840a78abc1711b272d2ebc8d5b43bbdd3df91905c43a2a46b42a2",
+            "ruleId": "rule_d7fa398447ddd6f51886567974e7ac7fa8802cc93815ec140ebdf4d323fd629a",
             "sourceIPs": ["5.62.63.30/32"],
             "destinationIPs": ["100.98.85.4/32"],
             "sourcePorts": ["8080"],
