@@ -32,10 +32,18 @@ def reset_state():
     # generation/permanent tests are deterministic regardless of any persisted
     # data/response_template.json on disk.
     response_template.set_template({"enabled": False, "rules": [{"action": "allow"}]})
+    # Remove any named templates left over from a previous test so generation
+    # and permanent-network tests stay deterministic.
+    for _t in response_template.list_templates():
+        if _t["id"] != "default":
+            response_template.delete_template(_t["id"])
     yield
     generation_config.clear()
     generation_config.update(saved)
     rules_store.clear()
+    for _t in response_template.list_templates():
+        if _t["id"] != "default":
+            response_template.delete_template(_t["id"])
 
 
 def _post(tag, networks):
@@ -222,6 +230,46 @@ def test_template_networks_default_when_omitted():
     t = client.get("/ui/template").json()
     assert t["networks"] == ["100.98.10.0/24"]
     _disable_template()
+
+
+# --- Multiple templates (Tab 2, plural API) ---------------------------------
+
+def test_multiple_templates_coexist_and_match():
+    a = client.post("/ui/templates", json={
+        "name": "A", "enabled": True,
+        "networks": ["10.11.12.0/24"], "rules": [{"action": "block"}]})
+    b = client.post("/ui/templates", json={
+        "name": "B", "enabled": True,
+        "networks": ["10.22.33.0/24"], "rules": [{"action": "allow"}]})
+    assert a.status_code == 201 and b.status_code == 201
+    names = {t["name"] for t in client.get("/ui/templates").json()["templates"]}
+    assert {"A", "B"} <= names
+    # each template only matches its own network
+    ra = _post("t", ["10.11.12.0/24"]).json()["rules"]
+    rb = _post("t", ["10.22.33.0/24"]).json()["rules"]
+    assert ra[0]["destinationIPs"] == ["10.11.12.0/24"]
+    assert rb[0]["destinationIPs"] == ["10.22.33.0/24"]
+
+
+def test_templates_rule_ids_globally_unique():
+    client.post("/ui/templates", json={
+        "name": "U1", "enabled": True, "networks": ["10.44.0.0/24"],
+        "rules": [{"action": "block"}, {"action": "allow"}]})
+    client.post("/ui/templates", json={
+        "name": "U2", "enabled": True, "networks": ["10.55.0.0/24"],
+        "rules": [{"action": "block"}, {"action": "allow"}]})
+    ids = [r["ruleId"] for r in _post("t", ["10.44.0.0/24"]).json()["rules"]]
+    ids += [r["ruleId"] for r in _post("t", ["10.55.0.0/24"]).json()["rules"]]
+    assert len(set(ids)) == len(ids)
+
+
+def test_template_delete_and_404():
+    created = client.post("/ui/templates", json={
+        "name": "Doomed", "enabled": True, "networks": ["10.66.0.0/24"],
+        "rules": [{"action": "allow"}]}).json()["template"]
+    tid = created["id"]
+    assert client.delete(f"/ui/templates/{tid}").status_code == 200
+    assert client.delete(f"/ui/templates/{tid}").status_code == 404
 
 
 # --- Cyber Controller registry (Tab 1) --------------------------------------

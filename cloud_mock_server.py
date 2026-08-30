@@ -94,6 +94,12 @@ class TemplatePreviewRequest(BaseModel):
     networks: list[str] = Field(default_factory=lambda: ["100.98.10.0/24"])
     rules: list[dict[str, Any]] | None = None
 
+class TemplateUpsertRequest(BaseModel):
+    name: str = ""
+    enabled: bool = True
+    networks: list[str] = Field(default_factory=list)
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+
 class ConfigureCCRequest(BaseModel):
     cc_host: str = Field(min_length=1)
     ssh_user: str = "root"
@@ -178,11 +184,12 @@ def get_recommendation(request: GetRecommendationRequest) -> dict[str, Any]:
         raw = rules_store.get(request.tag)
         if raw is not None:
             rules = [_normalize(r) for r in raw]
-        elif response_template.is_enabled():
-            # User-edited template: dst network always matches the request.
-            rules = response_template.build_rules(request.networks)
         else:
-            rules = _generate(request.networks)
+            # User-edited templates: dst network always matches the request.
+            # build_rules returns [] when no enabled template matches, so we
+            # fall back to auto-generation in that case.
+            tpl_rules = response_template.build_rules(request.networks)
+            rules = tpl_rules if tpl_rules else _generate(request.networks)
     return {
         "account_id": _ACCOUNT_ID,
         "rules": rules,
@@ -294,26 +301,62 @@ def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
     return {"networks": networks, "rules": rules}
 
 
+# --- Tab 2 (multi-template): manage many recommendation templates -----------
+@app.get("/ui/templates")
+def list_templates() -> dict[str, Any]:
+    return {"templates": response_template.list_templates()}
+
+
+@app.post("/ui/templates", status_code=201)
+def create_template(body: TemplateUpsertRequest) -> dict[str, Any]:
+    try:
+        tpl = response_template.add_template(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"created": True, "template": tpl}
+
+
+@app.put("/ui/templates/{template_id}")
+def edit_template(template_id: str, body: TemplateUpsertRequest) -> dict[str, Any]:
+    try:
+        tpl = response_template.update_template(template_id, body.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"saved": True, "template": tpl}
+
+
+@app.delete("/ui/templates/{template_id}")
+def remove_template(template_id: str) -> dict[str, Any]:
+    if not response_template.delete_template(template_id):
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+    return {"removed": template_id}
+
+
 # --- Tab 3: browse existing recommendations ---------------------------------
 @app.get("/ui/recommendations")
 def list_recommendations() -> dict[str, Any]:
     """Return all existing rule sets so users can browse and reuse them.
 
-    - 'template':  the current editable template (Tab 2), if it has rules
+    - 'template':  every editable template (Tab 2) that currently has rules
     - 'permanent': pinned per-network responses (permanent_responses.py)
     - 'seeded':    tag-based rule sets loaded from recommendations/ or /admin/seed
     """
-    tpl = response_template.get_template()
     template_group = []
-    if tpl.get("rules"):
+    for tpl in response_template.list_templates():
+        if not tpl.get("rules"):
+            continue
         state = "active" if tpl.get("enabled") else "inactive"
-        template_group = [{
+        nets = tpl.get("networks", [])
+        scope = ", ".join(nets) if nets else "any network"
+        template_group.append({
             "kind": "template",
-            "key": f"Template (current \u2014 {state})",
-            "networks": tpl.get("networks", []),
+            "key": f"{tpl.get('name', 'Template')} \u2014 {state} ({scope})",
+            "networks": nets,
             "count": len(tpl["rules"]),
             "rules": tpl["rules"],
-        }]
+        })
     permanent = [
         {"kind": "permanent", "key": net, "networks": [net],
          "count": len(rules), "rules": rules}

@@ -131,21 +131,31 @@ th{color:#1a3c5e}
     </div>
   </section>
 
-  <!-- ============ TAB 2: TEMPLATE ============ -->
+  <!-- ============ TAB 2: TEMPLATES ============ -->
   <section class="panel" id="panel-tpl">
     <div class="card">
-      <h2>&#128221; Recommendation template <span class="badge off" id="tpl_badge">inactive</span></h2>
+      <h2>&#128221; Recommendation templates
+        <button class="sec small" style="float:right" onclick="newTemplate()" title="Create a new recommendation template">&#10133; New template</button>
+      </h2>
       <p class="sub">
-        Returned for any request that isn't a pinned network. The
-        <b>destination network always matches the incoming request</b> &mdash; every
-        other field (TTL, protocol, ports, geo, ASN&hellip;) is optional.
+        Create as many templates as you need. Each template returns its rules for
+        matching requests; a template with <b>no request networks</b> is a catch-all
+        used for any request that isn't a pinned network. The
+        <b>destination network always matches the incoming request</b>.
       </p>
-      <label>Request network(s) (csv)</label>
-      <input id="pv_net" value="100.98.10.0/24" title="Networks used for Preview; saved together with the template">
-      <p class="hint">Used for the Preview below and saved with the template.</p>
+      <div id="tpl_list">Loading&hellip;</div>
+    </div>
+
+    <div class="card" id="tpl_editor" style="display:none">
+      <h2 id="tpl_editor_title">&#128221; New template <span class="badge off" id="tpl_badge">inactive</span></h2>
+      <label>Template name</label>
+      <input id="tpl_name" placeholder="e.g. Block UDP floods" title="A friendly name to identify this template">
+      <label>Request network(s) (csv) &mdash; leave blank for a catch-all</label>
+      <input id="pv_net" value="" title="Networks this template matches; blank = any request. Also used for Preview.">
+      <p class="hint">Blank = catch-all (matches any request that isn't a pinned network). Used for the Preview below.</p>
       <div class="switch">
         <input type="checkbox" id="tpl_enabled" onchange="renderBadge()">
-        <label style="margin:0">Use this template for responses (off = built-in auto-generation)</label>
+        <label style="margin:0">Use this template for responses (off = saved but inactive)</label>
       </div>
 
       <label>Add a rule (all fields optional)</label>
@@ -170,11 +180,11 @@ th{color:#1a3c5e}
       <textarea id="tpl_json" rows="12"></textarea>
       <p class="hint"><code>destinationIPs</code> is ignored/overwritten per request. A JSON array of rule objects. Blank <code>fragment</code>/<code>action</code> default to <code>none</code>/<code>allow</code> (ADE rejects null values).</p>
       <button onclick="saveTemplate()" title="Persist the template and activate it for all Cyber Controllers">&#128190; Save template</button>
-    </div>
+      <button class="sec" onclick="cancelEdit()" title="Discard changes and close the editor">Cancel</button>
 
-    <div class="card">
-      <h2>&#128269; Preview a live response</h2>
-      <p class="sub">See exactly what a CC would receive for the <b>Request network(s)</b> set at the top of this tab.</p>
+      <hr style="margin:18px 0;border:none;border-top:1px solid #eee">
+      <h2 style="margin-top:0">&#128269; Preview a live response</h2>
+      <p class="sub">See exactly what a CC would receive for the <b>Request network(s)</b> above.</p>
       <button class="sec" onclick="previewTemplate()" title="Build the response for the Request network(s) above without saving">&#9654; Preview</button>
       <pre class="log" id="pv_out" style="display:none"></pre>
     </div>
@@ -225,6 +235,7 @@ function switchTab(name){
   document.getElementById("panel-tpl").classList.toggle("active",name==="tpl");
   document.getElementById("panel-rec").classList.toggle("active",name==="rec");
   if(name==="rec")loadRecs();
+  if(name==="tpl")loadTemplates();
 }
 function copyAddr(){navigator.clipboard.writeText(SIM_ADDR).then(()=>toast("Endpoint copied"));}
 async function readJson(r){const t=await r.text();try{return JSON.parse(t);}catch(e){return {ok:false,log:[(t||("HTTP "+r.status)).slice(0,400)]};}}
@@ -328,7 +339,9 @@ async function removeCC(host){
   toast("Removed "+host);loadCCs();
 }
 
-/* ---------- Tab 2: template ---------- */
+/* ---------- Tab 2: templates ---------- */
+let TEMPLATES = [];          // full list from the server
+let EDIT_ID = null;          // id of the template being edited, or null for a new one
 function currentRules(){const raw=document.getElementById("tpl_json").value.trim();return raw?JSON.parse(raw):[];}
 function renderBadge(){
   const on=document.getElementById("tpl_enabled").checked;
@@ -354,25 +367,73 @@ function addRule(){
   document.getElementById("r_action").value="";
   toast("Rule added (remember to Save)");
 }
+/* -- template list rendering -- */
+async function loadTemplates(){
+  const el=document.getElementById("tpl_list");
+  try{
+    const d=await(await fetch("/ui/templates")).json();
+    TEMPLATES=(d.templates||[]).filter(t=>(t.rules||[]).length);
+    if(!TEMPLATES.length){el.innerHTML='<span style="color:#888">No templates yet. Click <b>New template</b> to create one.</span>';return;}
+    el.innerHTML='<table><tr><th>Name</th><th>Networks</th><th>Rules</th><th>Status</th><th></th></tr>'+
+      TEMPLATES.map(t=>{
+        const nets=(t.networks&&t.networks.length)?escapeHtml(t.networks.join(", ")):'<span style="opacity:.6">any network</span>';
+        const st=t.enabled?'<span class="badge on">active</span>':'<span class="badge off">inactive</span>';
+        return `<tr>
+          <td><b>${escapeHtml(t.name||"Template")}</b></td>
+          <td>${nets}</td>
+          <td>${(t.rules||[]).length}</td>
+          <td>${st}</td>
+          <td style="white-space:nowrap">
+            <button class="small" onclick="editTemplate('${t.id}')" title="Edit this template">&#9998; Edit</button>
+            <button class="sec small" style="margin-left:6px" onclick="toggleTemplate('${t.id}')" title="Enable/disable this template">${t.enabled?'Disable':'Enable'}</button>
+            <button class="danger small" style="margin-left:6px" onclick="deleteTemplate('${t.id}')" title="Delete this template">&#128465;</button>
+          </td></tr>`;}).join("")+'</table>';
+  }catch(e){el.textContent="Could not load templates.";}
+}
+function fillEditor(t){
+  EDIT_ID=t?t.id:null;
+  document.getElementById("tpl_editor").style.display="block";
+  document.getElementById("tpl_editor_title").innerHTML=(t?"&#9998; Edit template":"&#128221; New template")+' <span class="badge off" id="tpl_badge">inactive</span>';
+  document.getElementById("tpl_name").value=t?(t.name||""):"";
+  document.getElementById("pv_net").value=t?((t.networks||[]).join(",")):"";
+  document.getElementById("tpl_enabled").checked=t?!!t.enabled:true;
+  document.getElementById("tpl_json").value=JSON.stringify((t&&t.rules)||[],null,2);
+  renderBadge();
+  document.getElementById("tpl_editor").scrollIntoView({behavior:"smooth"});
+}
+function newTemplate(){fillEditor(null);}
+function editTemplate(id){const t=TEMPLATES.find(x=>x.id===id);if(t)fillEditor(t);}
+function cancelEdit(){document.getElementById("tpl_editor").style.display="none";EDIT_ID=null;}
+async function toggleTemplate(id){
+  const t=TEMPLATES.find(x=>x.id===id);if(!t)return;
+  const body={name:t.name,enabled:!t.enabled,networks:t.networks||[],rules:t.rules||[]};
+  const r=await fetch("/ui/templates/"+encodeURIComponent(id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){toast(t.enabled?"Template disabled":"Template enabled");loadTemplates();}else{toast("Update failed",false);}
+}
+async function deleteTemplate(id){
+  const t=TEMPLATES.find(x=>x.id===id);
+  if(!confirm('Delete template "'+((t&&t.name)||id)+'"? This cannot be undone.'))return;
+  const r=await fetch("/ui/templates/"+encodeURIComponent(id),{method:"DELETE"});
+  if(r.ok){toast("Template deleted");if(EDIT_ID===id)cancelEdit();loadTemplates();}else{toast("Delete failed",false);}
+}
 async function saveTemplate(){
   let rules;try{rules=currentRules();}catch(e){toast("Invalid JSON: "+e.message,false);return;}
   if(!Array.isArray(rules)||!rules.length){toast("Template needs at least one rule",false);return;}
   const nets=csv(document.getElementById("pv_net").value);
-  if(!nets.length){toast("Set at least one Request network at the top",false);return;}
-  const netStr=nets.join(", ");
-  const msg="Are you sure that "+netStr+" "+(nets.length>1?"are the destination networks":"is the destination network")+
-    " you want to use?\n\nEvery recommendation returned by this template will have its destination set to "+netStr+".";
+  const name=document.getElementById("tpl_name").value.trim();
+  const scope=nets.length?nets.join(", "):"ANY request network";
+  const msg="Save this template?\n\nEvery recommendation it returns will have its destination set to "+
+    (nets.length?scope:"the incoming request network")+".";
   if(!confirm(msg))return;
-  const body={enabled:document.getElementById("tpl_enabled").checked,networks:nets,rules};
-  const r=await fetch("/ui/template",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(r.ok){toast("Template saved (destination: "+netStr+")");renderBadge();}else{const d=await r.json();toast("Save failed: "+(d.detail||""),false);}
-}
-async function loadTemplate(){
-  const t=await(await fetch("/ui/template")).json();
-  document.getElementById("tpl_enabled").checked=!!t.enabled;
-  document.getElementById("pv_net").value=(t.networks||["100.98.10.0/24"]).join(",");
-  document.getElementById("tpl_json").value=JSON.stringify(t.rules||[],null,2);
-  renderBadge();
+  const body={name,enabled:document.getElementById("tpl_enabled").checked,networks:nets,rules};
+  const url=EDIT_ID?("/ui/templates/"+encodeURIComponent(EDIT_ID)):"/ui/templates";
+  const method=EDIT_ID?"PUT":"POST";
+  const r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){
+    const d=await r.json();
+    toast(EDIT_ID?"Template saved":"Template created");
+    cancelEdit();loadTemplates();
+  }else{const d=await readJson(r);toast("Save failed: "+(d.detail||""),false);}
 }
 async function previewTemplate(){
   let rules=null;try{rules=currentRules();}catch(e){}
@@ -432,9 +493,12 @@ async function loadRecs(){
 }
 function copyGroupToTemplate(idx){
   const g=REC_GROUPS[idx];if(!g)return;
-  document.getElementById("tpl_json").value=JSON.stringify(g.rules,null,2);
   switchTab("tpl");
-  toast(`Loaded ${g.count} rule(s) from ${g.key} into Template \u2014 review & Save`);
+  fillEditor(null);
+  document.getElementById("tpl_name").value=("Copy of "+g.key).slice(0,60);
+  document.getElementById("tpl_json").value=JSON.stringify(g.rules,null,2);
+  if(g.networks&&g.networks.length)document.getElementById("pv_net").value=g.networks.join(",");
+  toast(`Loaded ${g.count} rule(s) from ${g.key} into a NEW template \u2014 review & Save`);
 }
 /* JSON modal */
 let MODAL_RULES=null;
@@ -449,13 +513,15 @@ function closeModal(){document.getElementById("jsonmodal").classList.remove("sho
 function copyJsonBody(){navigator.clipboard.writeText(document.getElementById("json_body").textContent).then(()=>toast("JSON copied"));}
 function copyModalToTemplate(){
   if(!MODAL_RULES)return;
+  closeModal();switchTab("tpl");
+  fillEditor(null);
   document.getElementById("tpl_json").value=JSON.stringify(MODAL_RULES,null,2);
-  closeModal();switchTab("tpl");toast("Loaded into Template \u2014 review & Save");
+  toast("Loaded into a NEW template \u2014 review & Save");
 }
 document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id==="jsonmodal")closeModal();});
 
 /* init */
-loadStatus();loadCCs();loadTemplate();
+loadStatus();loadCCs();loadTemplates();
 setInterval(loadStatus,15000);</script>
 </body>
 </html>
