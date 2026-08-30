@@ -56,8 +56,15 @@ _DEFAULT_TEMPLATE: dict[str, Any] = {
 }
 
 
+# Salt mixed into generated template rule IDs. Bump this to rotate all
+# template-derived rule IDs at once.
+_RULE_ID_SALT = "v2-2026-08-30"
+
+
 def _rule_id(network: str, index: int) -> str:
-    return "rule_" + hashlib.sha256(f"{network}:{index}".encode()).hexdigest()
+    return "rule_" + hashlib.sha256(
+        f"{_RULE_ID_SALT}:{network}:{index}".encode()
+    ).hexdigest()
 
 
 # In-memory copy, loaded once and kept in sync with disk.
@@ -146,6 +153,7 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
             rule["status"] = "success"
             out.append(rule)
     return out
+
 
 
 
