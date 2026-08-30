@@ -2,14 +2,23 @@ from __future__ import annotations
 import hashlib, json, os, socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse
-from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, field_validator
 
 from permanent_responses import permanent_rules_for, PERMANENT_NETWORK_RULES
 import response_template
 import cc_manager
+import netvalidate
+import netgen
+
+# Largest scale-test set that may be materialized in memory and served through
+# _getRecommendation. Larger sets should use the streaming download endpoint.
+SCALE_MAX_SERVE = int(os.environ.get("SCALE_MAX_SERVE", "50000"))
+# Hard ceiling for a single streaming download (protects the box from a typo).
+SCALE_MAX_DOWNLOAD = int(os.environ.get("SCALE_MAX_DOWNLOAD", "2000000"))
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -20,6 +29,24 @@ app = FastAPI(
 )
 
 rules_store: dict[str, list[dict[str, Any]]] = {}
+
+# Scale-test specs keyed by tag, so a materialized scale set can be regenerated
+# for the streaming download without keeping the whole list in memory.
+scale_specs: dict[str, dict[str, Any]] = {}
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return a single, human-readable validation message instead of the raw
+    pydantic error list, so the UI can show a clear error to the user."""
+    parts: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in err.get("loc", []) if x not in ("body", "query"))
+        msg = err.get("msg", "invalid value")
+        msg = msg.replace("Value error, ", "")
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return JSONResponse(status_code=422, content={"detail": "; ".join(parts) or "Invalid request."})
+
 
 generation_config: dict[str, Any] = {
     "rules_per_network": 3,
@@ -64,6 +91,19 @@ class GetRecommendationRequest(BaseModel):
     tag: str = Field(min_length=1)
     networks: list[str] = Field(min_length=1)
 
+    @field_validator("networks")
+    @classmethod
+    def _validate_networks(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError(
+                "at least one destination network is required, "
+                "e.g. [\"1.1.1.1/32\"]."
+            )
+        for n in v:
+            # Each destination must be a valid IPv4/IPv6 subnet (CIDR).
+            netvalidate.validate_cidr(n, field="destination network")
+        return v
+
 class GenerationConfigRequest(BaseModel):
     rules_per_network: int = Field(default=3, ge=1, le=50)
     sourceIPs: list[str] = Field(default_factory=list)
@@ -99,6 +139,18 @@ class TemplateUpsertRequest(BaseModel):
     enabled: bool = True
     networks: list[str] = Field(default_factory=list)
     rules: list[dict[str, Any]] = Field(default_factory=list)
+
+class ScaleRequest(BaseModel):
+    destination_network: str = Field(min_length=1)
+    count: int = Field(ge=1)
+    mode: str = "dst-seq"                      # dst-seq | src-seq | random
+    source_network: str | None = None
+    host_prefix: int | None = None
+    protocol: list[str] = Field(default_factory=list)
+    source_ports: list[str] = Field(default_factory=list)
+    destination_ports: list[str] = Field(default_factory=list)
+    action: str = "allow"
+    tag: str = "scale"
 
 class ConfigureCCRequest(BaseModel):
     cc_host: str = Field(min_length=1)
@@ -332,6 +384,100 @@ def remove_template(template_id: str) -> dict[str, Any]:
     if not response_template.delete_template(template_id):
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
     return {"removed": template_id}
+
+
+# --- Scale testing: generate many unique recommendations --------------------
+def _spec_from_request(body: ScaleRequest, *, max_count: int | None = None) -> dict[str, Any]:
+    try:
+        return netgen.build_spec(
+            destination_network=body.destination_network,
+            count=body.count,
+            mode=body.mode,
+            source_network=body.source_network,
+            host_prefix=body.host_prefix,
+            protocol=body.protocol,
+            source_ports=body.source_ports,
+            destination_ports=body.destination_ports,
+            action=body.action,
+            tag=body.tag,
+            max_count=max_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/ui/scale/preview")
+def scale_preview(body: ScaleRequest) -> dict[str, Any]:
+    """Validate a scale spec and return a small sample plus capacity info.
+
+    Builds only a handful of rules, never the full set, so it stays instant.
+    """
+    spec = _spec_from_request(body)
+    sample = netgen.sample_rules(spec, 5)
+    # Rough per-rule size estimate (compact JSON) for a heads-up on payload size.
+    est_bytes = len(json.dumps(sample[0])) * spec["count"] if sample else 0
+    return {
+        "ok": True,
+        "mode": spec["mode"],
+        "count": spec["count"],
+        "capacity": spec["capacity"],
+        "host_prefix": spec["host_prefix"],
+        "destination_network": spec["destination_network"],
+        "source_network": spec["source_network"],
+        "serve_limit": SCALE_MAX_SERVE,
+        "download_limit": SCALE_MAX_DOWNLOAD,
+        "estimated_bytes": est_bytes,
+        "sample": sample,
+    }
+
+
+@app.post("/ui/scale/generate")
+def scale_generate(body: ScaleRequest) -> dict[str, Any]:
+    """Materialize a scale set and serve it under ``tag`` via _getRecommendation.
+
+    Bounded by SCALE_MAX_SERVE to protect memory; for larger sets use the
+    streaming download instead.
+    """
+    spec = _spec_from_request(body, max_count=SCALE_MAX_SERVE)
+    rules = list(netgen.iter_rules(spec))
+    rules_store[spec["tag"]] = rules
+    scale_specs[spec["tag"]] = spec
+    # Sanity: confirm there are no duplicate destination/source pairs.
+    dst_seen = {tuple(r["destinationIPs"]) for r in rules}
+    src_seen = {tuple(r["sourceIPs"]) for r in rules}
+    unique_ids = len({r["ruleId"] for r in rules}) == len(rules)
+    return {
+        "generated": len(rules),
+        "tag": spec["tag"],
+        "mode": spec["mode"],
+        "unique_rule_ids": unique_ids,
+        "unique_destinations": len(dst_seen),
+        "unique_sources": len(src_seen),
+        "served_at_tag": spec["tag"],
+        "hint": f"A Cyber Controller querying tag '{spec['tag']}' now receives "
+                f"{len(rules)} rules. Use Download for larger sets.",
+    }
+
+
+@app.post("/ui/scale/download")
+def scale_download(body: ScaleRequest) -> StreamingResponse:
+    """Stream the full scale set as a downloadable JSON file (memory-safe)."""
+    spec = _spec_from_request(body, max_count=SCALE_MAX_DOWNLOAD)
+
+    def _stream() -> Iterator[str]:
+        head = {"tag": spec["tag"], "mode": spec["mode"], "count": spec["count"]}
+        yield '{"tag": %s, "mode": %s, "count": %d, "rules": [' % (
+            json.dumps(head["tag"]), json.dumps(head["mode"]), head["count"])
+        first = True
+        for rule in netgen.iter_rules(spec):
+            yield ("" if first else ",") + json.dumps(rule)
+            first = False
+        yield "]}"
+
+    fname = f"scale_{spec['tag']}_{spec['mode']}_{spec['count']}.json"
+    return StreamingResponse(
+        _stream(), media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 # --- Tab 3: browse existing recommendations ---------------------------------

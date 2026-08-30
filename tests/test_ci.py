@@ -378,6 +378,131 @@ def test_configure_without_address_uses_host_header():
     assert body["ok"] is False
 
 
+# --- network (CIDR) validation: IPv4 + IPv6 with a required subnet -----------
+
+import netvalidate
+import netgen
+
+
+def test_netvalidate_accepts_ipv4_and_ipv6_cidr():
+    assert netvalidate.validate_cidr("1.1.1.1/32") == "1.1.1.1/32"
+    assert netvalidate.validate_cidr("10.0.0.0/8") == "10.0.0.0/8"
+    assert netvalidate.validate_cidr("2001:db8::/48") == "2001:db8::/48"
+    assert netvalidate.validate_cidr("2001:db8::1/128") == "2001:db8::1/128"
+
+
+@pytest.mark.parametrize("bad", [
+    "1.1.1.1",          # missing subnet
+    "2001:db8::",       # missing subnet (IPv6)
+    "1.1.1.1/33",       # prefix out of range (IPv4)
+    "2001:db8::/129",   # prefix out of range (IPv6)
+    "999.1.1.1/32",     # invalid octet
+    "not-an-ip/24",     # garbage
+    "",                 # empty
+])
+def test_netvalidate_rejects_bad_values(bad):
+    with pytest.raises(ValueError):
+        netvalidate.validate_cidr(bad)
+
+
+def test_getrecommendation_requires_subnet():
+    r = _post("t", ["1.1.1.1"])
+    assert r.status_code == 422
+    assert "subnet" in r.json()["detail"].lower()
+
+
+def test_getrecommendation_accepts_ipv6():
+    r = _post("t", ["2001:db8::/48"])
+    assert r.status_code == 200
+    assert r.json()["rules"]
+
+
+def test_getrecommendation_rejects_bad_prefix():
+    assert _post("t", ["10.0.0.0/40"]).status_code == 422
+
+
+# --- scale-test generation --------------------------------------------------
+
+def test_scale_preview_reports_capacity_and_sample():
+    d = client.post("/ui/scale/preview", json={
+        "destination_network": "10.9.0.0/24", "count": 100, "mode": "dst-seq"}).json()
+    assert d["ok"] is True
+    assert d["capacity"] == 256
+    assert len(d["sample"]) == 5
+    assert all(s["ruleId"].startswith("rule_") for s in d["sample"])
+
+
+def test_scale_dst_seq_unique_and_served():
+    r = client.post("/ui/scale/generate", json={
+        "destination_network": "10.9.0.0/24", "count": 200,
+        "mode": "dst-seq", "tag": "scale-dst"})
+    j = r.json()
+    assert j["generated"] == 200
+    assert j["unique_rule_ids"] is True
+    assert j["unique_destinations"] == 200
+    # served through _getRecommendation under the tag
+    served = _post("scale-dst", ["10.9.0.0/24"]).json()["rules"]
+    assert len(served) == 200
+    assert len({x["ruleId"] for x in served}) == 200
+    client.delete("/admin/seed/scale-dst")
+
+
+def test_scale_src_seq_unique_sources():
+    j = client.post("/ui/scale/generate", json={
+        "destination_network": "10.9.0.0/24", "count": 500, "mode": "src-seq",
+        "source_network": "172.16.0.0/16", "tag": "scale-src"}).json()
+    assert j["generated"] == 500
+    assert j["unique_sources"] == 500
+    client.delete("/admin/seed/scale-src")
+
+
+def test_scale_random_no_duplicates():
+    d = client.post("/ui/scale/download", json={
+        "destination_network": "10.9.0.0/24", "count": 300, "mode": "random",
+        "source_network": "10.80.0.0/16", "tag": "scale-rnd"})
+    import json as _json
+    rules = _json.loads(d.text)["rules"]
+    srcs = [tuple(r["sourceIPs"]) for r in rules]
+    ids = [r["ruleId"] for r in rules]
+    assert len(rules) == 300
+    assert len(set(srcs)) == 300           # no duplicate source IPs
+    assert len(set(ids)) == 300            # random rule IDs, all unique
+
+
+def test_scale_ipv6_destination_increment():
+    d = client.post("/ui/scale/download", json={
+        "destination_network": "2001:db8::/120", "count": 50, "mode": "dst-seq",
+        "tag": "scale-v6"})
+    import json as _json
+    rules = _json.loads(d.text)["rules"]
+    dsts = {tuple(r["destinationIPs"]) for r in rules}
+    assert len(rules) == 50
+    assert len(dsts) == 50
+    assert all(":" in r["destinationIPs"][0] for r in rules)  # IPv6
+
+
+def test_scale_count_exceeds_capacity_400():
+    r = client.post("/ui/scale/generate", json={
+        "destination_network": "10.9.0.0/30", "count": 100, "mode": "dst-seq"})
+    assert r.status_code == 400
+    assert "exceeds" in r.json()["detail"]
+
+
+def test_scale_random_requires_source_network():
+    r = client.post("/ui/scale/generate", json={
+        "destination_network": "10.9.0.0/24", "count": 10, "mode": "random"})
+    assert r.status_code == 400
+    assert "source network is required" in r.json()["detail"]
+
+
+def test_scale_rejects_bad_destination():
+    r = client.post("/ui/scale/preview", json={
+        "destination_network": "10.9.0.0", "count": 10, "mode": "dst-seq"})
+    assert r.status_code == 400
+    assert "subnet" in r.json()["detail"].lower()
+
+
+
 
 
 
