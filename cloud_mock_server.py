@@ -72,6 +72,12 @@ class GetRecommendationRequest(BaseModel):
     # detected address (useful for testing tools and behind NAT/proxies).
     networks: list[str] = Field(min_length=1)
     cc_ip: str | None = None
+    # The ADE sends a 'tag' (e.g. the device policy id) and REQUIRES it echoed
+    # back, non-empty, in the response metadata (its
+    # SocxPositiveRecommendationMetadataResponseData.validate() rejects a
+    # null/empty tag). It is NOT used for routing (routing is by CC IP); we only
+    # accept it and echo it back so the ADE accepts the response.
+    tag: str | int | None = None
 
     @field_validator("networks")
     @classmethod
@@ -232,11 +238,15 @@ def get_recommendation(request: GetRecommendationRequest, http: Request) -> dict
         # Nothing configured for this network -> single learning placeholder.
         rules.append(_learning_rule(net))
         net_status.append({"subnet": net, "status": "learning"})
+    # The ADE requires a non-empty 'tag' echoed back in the response metadata,
+    # or it rejects the whole response ("tag must not be null or empty"). Echo
+    # the tag the ADE sent; fall back to a non-empty placeholder if absent.
+    echo_tag = str(request.tag) if request.tag not in (None, "") else "default"
     return {
         "account_id": _ACCOUNT_ID,
         "rules": rules,
         "metadata": {
-            "tag": "",
+            "tag": echo_tag,
             "networks": net_status,
             "interval": _interval_for_now(),
         },
