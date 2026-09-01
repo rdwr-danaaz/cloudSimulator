@@ -206,6 +206,8 @@ th{color:#1a3c5e}
         Use <b>View JSON</b> to inspect a set, or <b>Copy to Template</b> to load
         it into the Template tab as a starting point.
       </p>
+      <input id="rec_search" oninput="renderRecs()" placeholder="&#128269; Search rule ID, network, protocol, source/dest IP, port, action&hellip;" style="margin-bottom:6px">
+      <p class="hint" id="rec_count" style="margin:0 0 8px"></p>
       <div id="rec_list">Loading&hellip;</div>
     </div>
   </section>
@@ -539,9 +541,11 @@ function ruleMatches(r,q){
 function renderRecs(){
   const el=document.getElementById("rec_list");
   const info=document.getElementById("rec_count");
-  const q=(document.getElementById("rec_search").value||"").trim().toLowerCase();
+  const searchEl=document.getElementById("rec_search");
+  const q=((searchEl&&searchEl.value)||"").trim().toLowerCase();
+  const setInfo=t=>{if(info)info.textContent=t;};
   if(!REC_GROUPS.length){
-    info.textContent="";
+    setInfo("");
     el.innerHTML='<span style="color:#888">No recommendations available. Pinned networks live in permanent_responses.py; per-CC sets come from the Scale test tab.</span>';
     return;
   }
@@ -589,11 +593,11 @@ function renderRecs(){
     </div>`;
   }).join("");
   if(!shownGroups){
-    info.textContent="";
+    setInfo("");
     el.innerHTML='<span style="color:#888">No rules match &ldquo;'+escapeHtml(q)+'&rdquo;.</span>';
     return;
   }
-  info.textContent = q ? (shownRules+" rule(s) in "+shownGroups+" set(s) match") : (REC_GROUPS.length+" set(s)");
+  setInfo(q ? (shownRules+" rule(s) in "+shownGroups+" set(s) match") : (REC_GROUPS.length+" set(s)"));
   el.innerHTML=html;
 }
 function copyText(t){if(t)navigator.clipboard.writeText(t).then(()=>toast("Rule ID copied"));}
