@@ -489,6 +489,28 @@ def test_recommendations_includes_cc_sets():
     assert any(g["count"] == 8 for g in cc)
 
 
+def test_cc_sets_list_and_delete():
+    # The Scale-test tab lists generated sets and can delete them.
+    _generate_for("10.4.4.4", "8.8.8.0/24", count=6, secondary_ip="10.4.4.5")
+    listing = client.get("/ui/cc-sets").json()["cc_sets"]
+    mine = [s for s in listing if s["cc_ip"] == "10.4.4.4"]
+    assert mine, "generated set not listed"
+    assert mine[0]["destination_network"] == "8.8.8.0/24"
+    assert mine[0]["secondary_ip"] == "10.4.4.5"
+    assert mine[0]["count"] == 6
+    # Delete it and confirm it is gone.
+    r = client.delete("/ui/cc-sets/10.4.4.4")
+    assert r.status_code == 200
+    assert r.json()["removed"] == "10.4.4.4"
+    after = client.get("/ui/cc-sets").json()["cc_sets"]
+    assert not any(s["cc_ip"] == "10.4.4.4" for s in after)
+
+
+def test_cc_sets_delete_unknown_is_404():
+    r = client.delete("/ui/cc-sets/203.0.113.99")
+    assert r.status_code == 404
+
+
 def test_recommendations_template_rules_include_ruleid():
     # Templates store rule specs without a ruleId; the browse endpoint must
     # expand them WITH a globally-unique ruleId so 'View JSON' shows real ids.

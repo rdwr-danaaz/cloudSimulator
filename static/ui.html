@@ -271,6 +271,16 @@ th{color:#1a3c5e}
       <button class="sec" onclick="scaleDownload()" title="Download the full set as a JSON file (streamed, memory-safe)">&#11015; Download JSON</button>
       <div id="sc_out" style="display:none"><label>Result</label><pre class="log" id="sc_log"></pre></div>
     </div>
+
+    <div class="card">
+      <h2>&#128203; Generated recommendation sets
+        <button class="sec small" style="float:right" onclick="loadCcSets()" title="Reload the list of generated sets">&#128260; Refresh</button>
+      </h2>
+      <p class="sub">Each set is assigned to a Cyber Controller (by IP) and served when that CC requests its destination network. Generating a new set for the same CC replaces the previous one.</p>
+      <input id="ccset_search" oninput="renderCcSets()" placeholder="&#128269; Search by CC IP, destination network, or mode&hellip;" style="margin-bottom:6px">
+      <p class="hint" id="ccset_count" style="margin:0 0 8px"></p>
+      <div id="ccset_list">Loading&hellip;</div>
+    </div>
   </section>
 
   </main>
@@ -304,7 +314,7 @@ function switchTab(name){
   document.getElementById("panel-scale").classList.toggle("active",name==="scale");
   if(name==="rec")loadRecs();
   if(name==="tpl")loadTemplates();
-  if(name==="scale")scaleModeChanged();
+  if(name==="scale"){scaleModeChanged();loadCcSets();}
 }
 function copyAddr(){navigator.clipboard.writeText(SIM_ADDR).then(()=>toast("Endpoint copied"));}
 async function readJson(r){const t=await r.text();try{return JSON.parse(t);}catch(e){return {ok:false,log:[(t||("HTTP "+r.status)).slice(0,400)]};}}
@@ -703,6 +713,7 @@ async function scaleGenerate(){
     "Unique destinations: "+d.unique_destinations.toLocaleString()+"\n"+
     "Unique sources: "+d.unique_sources.toLocaleString()+"\n\n"+d.hint);
   toast("Assigned to CC "+d.cc_ip);
+  loadCcSets();
 }
 async function scaleDownload(){
   const b=scaleBody();if(!scaleValid(b))return;
@@ -718,6 +729,61 @@ async function scaleDownload(){
     scaleShow("\u2705 Download started ("+b.count.toLocaleString()+" recommendations).");
     toast("Download started");
   }catch(e){scaleShow("\u274C "+e.message);toast("Download error",false);}
+}
+
+/* ---- Tab 4: generated recommendation sets (list / search / delete) ---- */
+let CC_SETS = [];
+async function loadCcSets(){
+  const el=document.getElementById("ccset_list");
+  if(!el)return;
+  el.textContent="Loading\u2026";
+  try{
+    const d=await(await fetch("/ui/cc-sets")).json();
+    CC_SETS=d.cc_sets||[];
+    renderCcSets();
+  }catch(e){el.textContent="Could not load generated sets: "+(e&&e.message?e.message:e);}
+}
+function renderCcSets(){
+  const el=document.getElementById("ccset_list");
+  const info=document.getElementById("ccset_count");
+  const searchEl=document.getElementById("ccset_search");
+  const q=((searchEl&&searchEl.value)||"").trim().toLowerCase();
+  const setInfo=t=>{if(info)info.textContent=t;};
+  if(!CC_SETS.length){
+    setInfo("");
+    el.innerHTML='<span style="color:#888">No generated sets yet. Use <b>Generate &amp; assign to CC</b> above to create one.</span>';
+    return;
+  }
+  const rows=CC_SETS.filter(s=>{
+    if(!q)return true;
+    return [s.cc_ip,s.secondary_ip,s.destination_network,s.mode]
+      .map(x=>String(x||"").toLowerCase()).join(" \u0001 ").indexOf(q)>=0;
+  });
+  if(!rows.length){
+    setInfo("");
+    el.innerHTML='<span style="color:#888">No sets match &ldquo;'+escapeHtml(q)+'&rdquo;.</span>';
+    return;
+  }
+  setInfo(q ? (rows.length+" of "+CC_SETS.length+" set(s) match") : (CC_SETS.length+" set(s)"));
+  el.innerHTML='<table><tr><th>CC IP</th><th>Secondary (HA)</th><th>Destination</th><th>Mode</th><th>Rules</th><th>Created</th><th></th></tr>'+
+    rows.map(s=>`<tr>
+      <td><b>${escapeHtml(s.cc_ip)}</b></td>
+      <td>${s.secondary_ip?escapeHtml(s.secondary_ip):'<span style="opacity:.5">\u2014</span>'}</td>
+      <td>${escapeHtml(s.destination_network)}</td>
+      <td>${escapeHtml(s.mode)}</td>
+      <td>${(s.count||0).toLocaleString()}</td>
+      <td>${escapeHtml(s.created_at||"")}</td>
+      <td style="white-space:nowrap">
+        <button class="danger small" onclick="deleteCcSet('${escapeHtml(s.cc_ip)}')" title="Delete this recommendation set">&#128465; Delete</button>
+      </td></tr>`).join("")+'</table>';
+}
+async function deleteCcSet(ccIp){
+  if(!confirm("Delete the recommendation set assigned to "+ccIp+"?\n\nThat CC will stop receiving these rules (it will fall back to the learning default for its network)."))return;
+  try{
+    const r=await fetch("/ui/cc-sets/"+encodeURIComponent(ccIp),{method:"DELETE"});
+    if(r.ok){toast("Deleted set for "+ccIp);loadCcSets();}
+    else{const d=await readJson(r);toast("Delete failed: "+(d.detail||r.status),false);}
+  }catch(e){toast("Delete error: "+e.message,false);}
 }
 
 /* init */
