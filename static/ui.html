@@ -521,7 +521,7 @@ async function loadRecs(){
     const d=await(await fetch("/ui/recommendations")).json();
     REC_GROUPS=d.groups||[];
     renderRecs();
-  }catch(e){el.textContent="Could not load recommendations.";}
+  }catch(e){el.textContent="Could not load recommendations: "+(e&&e.message?e.message:e);}
 }
 /* short, readable Rule ID for the table (full value shown on hover / in JSON) */
 function shortId(id){

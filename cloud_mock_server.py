@@ -274,9 +274,12 @@ def get_recommendation(request: GetRecommendationRequest, http: Request) -> dict
 @app.get("/ui", response_class=HTMLResponse)
 def ui() -> HTMLResponse:
     html = (STATIC_DIR / "ui.html")
+    # no-store so browsers always fetch the latest UI (avoids stale-cache bugs
+    # where an old ui.html lingers after a redeploy).
+    headers = {"Cache-Control": "no-store, max-age=0"}
     if html.exists():
-        return HTMLResponse(html.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>UI file missing</h1>", status_code=500)
+        return HTMLResponse(html.read_text(encoding="utf-8"), headers=headers)
+    return HTMLResponse("<h1>UI file missing</h1>", status_code=500, headers=headers)
 
 
 def _detect_ip() -> str:
