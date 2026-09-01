@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 from permanent_responses import permanent_rules_for, PERMANENT_NETWORK_RULES
@@ -204,6 +204,20 @@ def _caller_ip(request: GetRecommendationRequest, http: Request) -> str:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# A small inline shield favicon so browsers don't 404 on /favicon.ico.
+_FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>"
+    "<rect width='100' height='100' rx='18' fill='#1a3c5e'/>"
+    "<path d='M50 14 78 26v22c0 18-12 30-28 38C34 78 22 66 22 48V26z' fill='#4da3ff'/>"
+    "<path d='M43 52l-8-8-6 6 14 14 26-26-6-6z' fill='#fff'/></svg>"
+)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
 @app.post("/api/sdcc/genai/core/analysis/peacetime/_getRecommendation")
