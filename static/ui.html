@@ -519,52 +519,99 @@ async function loadRecs(){
   try{
     const d=await(await fetch("/ui/recommendations")).json();
     REC_GROUPS=d.groups||[];
-    if(!REC_GROUPS.length){el.innerHTML='<span style="color:#888">No recommendations available. Pinned networks live in permanent_responses.py; seeded tags come from the recommendations/ folder.</span>';return;}
-    el.innerHTML=REC_GROUPS.map((g,idx)=>{
-      const cls = g.kind==="permanent" ? "on" : (g.kind==="template" ? "info" : "off");
-      const badge = `<span class="badge ${cls}">${g.kind}</span>`;
-      const nets = (g.networks&&g.networks.length)?g.networks.join(", "):"";
-      const netChip = nets?`<span class="badge info" title="Destination network(s) matched on each request">dst: ${escapeHtml(nets)}</span>`:"";
-      const rows = g.rules.map((r,i)=>{
-        // For the template, the destination is ALWAYS overwritten with the
-        // request network at runtime, so show that (matches the dst chip) rather
-        // than any (ignored) destinationIPs stored in the rule.
-        const dst = (g.kind==="template" && nets)
-          ? nets
-          : ((r.destinationIPs&&r.destinationIPs.length)?fmt(r.destinationIPs):(nets||"\u2014"));
-        return `<tr>
-        <td>${i+1}</td>
-        <td>${fmt(r.protocol)}</td>
-        <td>${escapeHtml(fmt(r.sourceIPs))}</td>
-        <td>${escapeHtml(dst)}</td>
-        <td>${fmt(r.sourcePorts)}</td>
-        <td>${fmt(r.destinationPorts)}</td>
-        <td>${fmt(r.ttl)}</td>
-        <td>${fmt(r.fragment)}</td>
-        <td>${fmt(r.action)}</td></tr>`;}).join("");
-      return `<div class="recgroup">
-        <div class="rechead">${badge} <b>${escapeHtml(g.key)}</b> ${netChip}
-          <span style="opacity:.65">(${g.count} rule${g.count===1?'':'s'})</span>
-          <span class="spacer"></span>
-          <button class="sec small" onclick="viewGroupJson(${idx})" title="Inspect the full JSON for this set">&#128269; View JSON</button>
-          <button class="small" onclick="copyGroupToTemplate(${idx})" title="Load these rules into the Template tab">&#8631; Copy to Template</button>
-        </div>
-        <div class="recbody"><table>
-          <tr><th>#</th><th>Protocol</th><th>Source IPs</th><th>Destination IPs</th><th>SPorts</th><th>DPorts</th><th>TTL</th><th>Fragment</th><th>Action</th></tr>
-          ${rows}
-        </table></div>
-      </div>`;
-    }).join("");
+    renderRecs();
   }catch(e){el.textContent="Could not load recommendations.";}
+}
+/* short, readable Rule ID for the table (full value shown on hover / in JSON) */
+function shortId(id){
+  const s=String(id||"\u2014");
+  return s.length>22 ? s.slice(0,14)+"\u2026"+s.slice(-4) : s;
+}
+/* does a single rule match the free-text search term? */
+function ruleMatches(r,q){
+  if(!q)return true;
+  const hay=[r.ruleId,fmt(r.protocol),fmt(r.sourceIPs),fmt(r.destinationIPs),
+    fmt(r.sourcePorts),fmt(r.destinationPorts),fmt(r.ttl),fmt(r.fragment),
+    fmt(r.action),fmt(r.status)].join(" \u0001 ").toLowerCase();
+  return hay.indexOf(q)>=0;
+}
+function renderRecs(){
+  const el=document.getElementById("rec_list");
+  const info=document.getElementById("rec_count");
+  const q=(document.getElementById("rec_search").value||"").trim().toLowerCase();
+  if(!REC_GROUPS.length){
+    info.textContent="";
+    el.innerHTML='<span style="color:#888">No recommendations available. Pinned networks live in permanent_responses.py; per-CC sets come from the Scale test tab.</span>';
+    return;
+  }
+  let shownGroups=0, shownRules=0;
+  const html=REC_GROUPS.map((g,idx)=>{
+    const nets=(g.networks&&g.networks.length)?g.networks.join(", "):"";
+    // A group is kept if its key/networks match; then all rules show. Otherwise
+    // only the rules that match the term are shown.
+    const groupHit = q && ((g.key||"").toLowerCase().indexOf(q)>=0 || nets.toLowerCase().indexOf(q)>=0 || (g.kind||"").toLowerCase().indexOf(q)>=0);
+    const rules=g.rules.map((r,i)=>({r,i})).filter(x=>groupHit||ruleMatches(x.r,q));
+    if(!rules.length)return "";
+    shownGroups++; shownRules+=rules.length;
+    const cls = g.kind==="permanent" ? "on" : (g.kind==="template" ? "info" : "off");
+    const badge = `<span class="badge ${cls}">${g.kind}</span>`;
+    const netChip = nets?`<span class="badge info" title="Destination network(s) matched on each request">dst: ${escapeHtml(nets)}</span>`:"";
+    const rows = rules.map(({r,i})=>{
+      // For the template, the destination is ALWAYS overwritten with the
+      // request network at runtime, so show that (matches the dst chip).
+      const dst = (g.kind==="template" && nets)
+        ? nets
+        : ((r.destinationIPs&&r.destinationIPs.length)?fmt(r.destinationIPs):(nets||"\u2014"));
+      return `<tr>
+      <td>${i+1}</td>
+      <td><code title="${escapeHtml(r.ruleId||'')}" style="cursor:pointer" onclick="copyText('${escapeHtml(r.ruleId||'')}')">${escapeHtml(shortId(r.ruleId))}</code></td>
+      <td>${fmt(r.protocol)}</td>
+      <td>${escapeHtml(fmt(r.sourceIPs))}</td>
+      <td>${escapeHtml(dst)}</td>
+      <td>${fmt(r.sourcePorts)}</td>
+      <td>${fmt(r.destinationPorts)}</td>
+      <td>${fmt(r.ttl)}</td>
+      <td>${fmt(r.fragment)}</td>
+      <td>${fmt(r.action)}</td></tr>`;}).join("");
+    const shownNote = rules.length!==g.count ? ` <span style="opacity:.65">(showing ${rules.length} of ${g.count})</span>` : ` <span style="opacity:.65">(${g.count} rule${g.count===1?'':'s'})</span>`;
+    return `<div class="recgroup">
+      <div class="rechead">${badge} <b>${escapeHtml(g.key)}</b> ${netChip}
+        ${shownNote}
+        <span class="spacer"></span>
+        <button class="sec small" onclick="viewGroupJson(${idx})" title="Inspect the full JSON for this set">&#128269; View JSON</button>
+        <button class="small" onclick="copyGroupToTemplate(${idx})" title="Load these rules into the Template tab">&#8631; Copy to Template</button>
+      </div>
+      <div class="recbody"><table>
+        <tr><th>#</th><th>Rule ID</th><th>Protocol</th><th>Source IPs</th><th>Destination IPs</th><th>SPorts</th><th>DPorts</th><th>TTL</th><th>Fragment</th><th>Action</th></tr>
+        ${rows}
+      </table></div>
+    </div>`;
+  }).join("");
+  if(!shownGroups){
+    info.textContent="";
+    el.innerHTML='<span style="color:#888">No rules match &ldquo;'+escapeHtml(q)+'&rdquo;.</span>';
+    return;
+  }
+  info.textContent = q ? (shownRules+" rule(s) in "+shownGroups+" set(s) match") : (REC_GROUPS.length+" set(s)");
+  el.innerHTML=html;
+}
+function copyText(t){if(t)navigator.clipboard.writeText(t).then(()=>toast("Rule ID copied"));}
+/* strip response-only fields so copied rules become clean template specs with
+   FRESH, globally-unique rule ids (never reuse a source rule's id). */
+function toTemplateRules(rules){
+  return (rules||[]).map(r=>{
+    const {ruleId,status,destinationIPs,...spec}=r;   // drop these
+    return spec;
+  });
 }
 function copyGroupToTemplate(idx){
   const g=REC_GROUPS[idx];if(!g)return;
   switchTab("tpl");
   fillEditor(null);
   document.getElementById("tpl_name").value=("Copy of "+g.key).slice(0,60);
-  document.getElementById("tpl_json").value=JSON.stringify(g.rules,null,2);
+  document.getElementById("tpl_json").value=JSON.stringify(toTemplateRules(g.rules),null,2);
   if(g.networks&&g.networks.length)document.getElementById("pv_net").value=g.networks.join(",");
-  toast(`Loaded ${g.count} rule(s) from ${g.key} into a NEW template \u2014 review & Save`);
+  toast(`Loaded ${g.count} rule(s) from ${g.key} into a NEW template \u2014 fresh Rule IDs will be generated on Save`);
 }
 /* JSON modal */
 let MODAL_RULES=null;
@@ -581,8 +628,8 @@ function copyModalToTemplate(){
   if(!MODAL_RULES)return;
   closeModal();switchTab("tpl");
   fillEditor(null);
-  document.getElementById("tpl_json").value=JSON.stringify(MODAL_RULES,null,2);
-  toast("Loaded into a NEW template \u2014 review & Save");
+  document.getElementById("tpl_json").value=JSON.stringify(toTemplateRules(MODAL_RULES),null,2);
+  toast("Loaded into a NEW template \u2014 fresh Rule IDs will be generated on Save");
 }
 document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id==="jsonmodal")closeModal();});
 

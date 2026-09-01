@@ -273,3 +273,30 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
                     out.append(rule)
     return out
 
+
+def expand_template(template: dict[str, Any], networks: list[str] | None = None) -> list[dict[str, Any]]:
+    """Expand a SINGLE template dict into concrete rules WITH a ``ruleId``,
+    regardless of the template's enabled state. Used by the UI to browse/inspect
+    a template (so 'View JSON' shows the real, globally-unique rule ids).
+
+    ``networks`` picks the representative destination(s); when omitted (a
+    catch-all template) a placeholder network is used so a stable id can be
+    shown. This mirrors :func:`build_rules` for a single template.
+    """
+    tid = str(template.get("id") or _DEFAULT_ID)
+    nets = [n for n in (networks or template.get("networks") or []) if n] or ["0.0.0.0/0"]
+    out: list[dict[str, Any]] = []
+    for net in nets:
+        for i, rt in enumerate(template.get("rules", [])):
+            rule: dict[str, Any] = {
+                "ruleId": rt.get("ruleId") or _rule_id(tid, net, i),
+                "destinationIPs": [net],
+            }
+            for field in _OPTIONAL_FIELDS:
+                if field in rt and rt[field] not in (None, "", []):
+                    rule[field] = rt[field]
+            rule.setdefault("fragment", "none")
+            rule.setdefault("action", "allow")
+            rule["status"] = "success"
+            out.append(rule)
+    return out

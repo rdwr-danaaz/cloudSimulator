@@ -489,6 +489,24 @@ def test_recommendations_includes_cc_sets():
     assert any(g["count"] == 8 for g in cc)
 
 
+def test_recommendations_template_rules_include_ruleid():
+    # Templates store rule specs without a ruleId; the browse endpoint must
+    # expand them WITH a globally-unique ruleId so 'View JSON' shows real ids.
+    response_template.add_template({
+        "name": "RID demo", "enabled": True,
+        "networks": ["9.9.9.0/24"],
+        "rules": [{"action": "block"}, {"protocol": ["6"]}],
+    })
+    d = client.get("/ui/recommendations").json()
+    tpls = [g for g in d["groups"] if g["kind"] == "template" and "RID demo" in g["key"]]
+    assert tpls, "template group missing"
+    rules = tpls[0]["rules"]
+    assert tpls[0]["count"] == len(rules) == 2
+    ids = [r["ruleId"] for r in rules]
+    assert all(rid.startswith("rule_") for rid in ids)
+    assert len(set(ids)) == len(ids)  # unique within the set
+
+
 def test_configure_without_address_uses_host_header():
     r = client.post("/ui/cc/configure", json={
         "cc_host": "127.0.0.1", "ssh_user": "root", "ssh_pass": "x",

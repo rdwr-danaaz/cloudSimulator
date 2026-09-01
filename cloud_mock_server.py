@@ -547,12 +547,16 @@ def list_recommendations() -> dict[str, Any]:
         state = "active" if tpl.get("enabled") else "inactive"
         nets = tpl.get("networks", [])
         scope = ", ".join(nets) if nets else "any network"
+        # Expand to concrete rules WITH ruleId (using one representative network
+        # so the count matches the stored rules) so 'View JSON' shows real ids.
+        rep = [nets[0]] if nets else None
+        display_rules = response_template.expand_template(tpl, rep)
         template_group.append({
             "kind": "template",
             "key": f"{tpl.get('name', 'Template')} \u2014 {state} ({scope})",
             "networks": nets,
-            "count": len(tpl["rules"]),
-            "rules": tpl["rules"],
+            "count": len(display_rules),
+            "rules": display_rules,
         })
     permanent = [
         {"kind": "permanent", "key": net, "networks": [net],
