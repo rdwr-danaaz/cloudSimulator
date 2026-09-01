@@ -700,19 +700,22 @@ async function scalePreview(){
 }
 async function scaleGenerate(){
   const b=scaleBody();if(!scaleValid(b,{needCC:true}))return;
+  // Safeguard: warn before replacing this CC's own existing set.
+  const existing=(CC_SETS||[]).find(s=>s.cc_ip===b.cc_ip);
+  if(existing && !confirm("Cyber Controller "+b.cc_ip+" already has a recommendation set (destination "+existing.destination_network+", "+existing.count+" rules).\n\nA machine can hold only ONE set \u2014 generating now will REPLACE it. Continue?"))return;
   scaleShow("Generating "+b.count.toLocaleString()+" recommendations for CC "+b.cc_ip+"\u2026");
   const r=await fetch("/ui/scale/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
   const d=await readJson(r);
   if(!r.ok){scaleShow("\u274C "+(d.detail||"Generation failed"));toast("Generation failed",false);return;}
   scaleShow(
-    "\u2705 Generated "+d.generated.toLocaleString()+" recommendations.\n"+
+    "\u2705 "+(d.replaced?"Replaced":"Created")+" set \u2014 generated "+d.generated.toLocaleString()+" recommendations.\n"+
     "Assigned to CC: "+d.cc_ip+(d.secondary_ip?(" (secondary "+d.secondary_ip+")"):"")+"\n"+
     "Destination network: "+d.destination_network+"\n"+
     "Mode: "+d.mode+"\n"+
     "Unique Rule IDs: "+d.unique_rule_ids+"\n"+
     "Unique destinations: "+d.unique_destinations.toLocaleString()+"\n"+
     "Unique sources: "+d.unique_sources.toLocaleString()+"\n\n"+d.hint);
-  toast("Assigned to CC "+d.cc_ip);
+  toast((d.replaced?"Replaced set for ":"Assigned to CC ")+d.cc_ip);
   loadCcSets();
 }
 async function scaleDownload(){

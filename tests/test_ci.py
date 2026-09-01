@@ -511,6 +511,41 @@ def test_cc_sets_delete_unknown_is_404():
     assert r.status_code == 404
 
 
+def test_regenerating_same_cc_replaces_not_duplicates():
+    # A machine holds at most one set: regenerating for the same primary IP
+    # replaces it (flagged replaced=True) and never creates a second entry.
+    first = _generate_for("10.7.7.7", "20.20.20.0/24", count=4)
+    assert first.status_code == 200 and first.json()["replaced"] is False
+    second = _generate_for("10.7.7.7", "21.21.21.0/24", count=9)
+    assert second.status_code == 200 and second.json()["replaced"] is True
+    sets = [s for s in client.get("/ui/cc-sets").json()["cc_sets"] if s["cc_ip"] == "10.7.7.7"]
+    assert len(sets) == 1
+    assert sets[0]["destination_network"] == "21.21.21.0/24"
+    assert sets[0]["count"] == 9
+
+
+def test_ip_belongs_to_at_most_one_set_primary_conflict():
+    # An IP already used by another set (as primary) cannot become another set's
+    # primary or secondary -> 409 conflict.
+    _generate_for("10.8.8.8", "22.22.22.0/24", count=3)
+    # Same IP as a different set's primary.
+    r = _generate_for("10.8.8.8", "23.23.23.0/24", count=3, secondary_ip="10.8.8.9")
+    assert r.json()["replaced"] is True  # same primary -> allowed replace
+    # A different set trying to use 10.8.8.8 as its secondary must be refused.
+    r2 = _generate_for("10.8.8.20", "24.24.24.0/24", count=3, secondary_ip="10.8.8.8")
+    assert r2.status_code == 409
+
+
+def test_ip_belongs_to_at_most_one_set_secondary_conflict():
+    _generate_for("10.10.0.1", "25.25.25.0/24", count=3, secondary_ip="10.10.0.2")
+    # Another CC cannot reuse the secondary IP 10.10.0.2 as its primary.
+    r = _generate_for("10.10.0.2", "26.26.26.0/24", count=3)
+    assert r.status_code == 409
+    # ...nor as its secondary.
+    r2 = _generate_for("10.10.0.9", "27.27.27.0/24", count=3, secondary_ip="10.10.0.2")
+    assert r2.status_code == 409
+
+
 def test_recommendations_template_rules_include_ruleid():
     # Templates store rule specs without a ruleId; the browse endpoint must
     # expand them WITH a globally-unique ruleId so 'View JSON' shows real ids.

@@ -65,6 +65,21 @@ def _cc_set_for(caller_ip: str) -> dict[str, Any] | None:
     return None
 
 
+def _ip_owner(ip: str, exclude_key: str | None = None) -> dict[str, Any] | None:
+    """Return the existing set that already claims ``ip`` (as its primary OR
+    secondary IP), excluding the set keyed by ``exclude_key``. Used to guarantee
+    a machine belongs to at most one recommendation set, so IP-based routing is
+    never ambiguous."""
+    if not ip:
+        return None
+    for key, s in cc_sets.items():
+        if key == exclude_key:
+            continue
+        if ip == s.get("cc_ip") or ip == (s.get("secondary_ip") or ""):
+            return s
+    return None
+
+
 class GetRecommendationRequest(BaseModel):
     # A Cyber Controller sends ONLY the destination network(s). Recommendations
     # are routed by the CALLING CC's IP, which the simulator auto-detects from
@@ -474,6 +489,24 @@ def scale_generate(body: ScaleRequest) -> dict[str, Any]:
         if secondary == cc_ip:
             raise HTTPException(status_code=400,
                                 detail="Secondary CC IP must differ from the primary CC IP.")
+    # Safeguard: a machine (IP) may belong to at most ONE recommendation set,
+    # whether as primary or secondary, so routing by CC IP is never ambiguous.
+    # Regenerating for the SAME primary IP is allowed (it replaces that CC's own
+    # set); using an IP that another set already claims is refused (409).
+    clash = _ip_owner(cc_ip, exclude_key=cc_ip)
+    if clash:
+        raise HTTPException(status_code=409, detail=(
+            f"CC IP {cc_ip} already belongs to the set for {clash['cc_ip']} "
+            f"(destination {clash['destination_network']}). Delete that set first "
+            f"or choose a different IP."))
+    if secondary:
+        clash = _ip_owner(secondary, exclude_key=cc_ip)
+        if clash:
+            raise HTTPException(status_code=409, detail=(
+                f"Secondary CC IP {secondary} already belongs to the set for "
+                f"{clash['cc_ip']} (destination {clash['destination_network']}). "
+                f"Delete that set first or choose a different IP."))
+    replaced = cc_ip in cc_sets
     spec = _spec_from_request(body, max_count=SCALE_MAX_SERVE)
     rules = list(netgen.iter_rules(spec))
     cc_sets[cc_ip] = {
@@ -493,6 +526,7 @@ def scale_generate(body: ScaleRequest) -> dict[str, Any]:
         "generated": len(rules),
         "cc_ip": cc_ip,
         "secondary_ip": secondary,
+        "replaced": replaced,
         "destination_network": spec["destination_network"],
         "mode": spec["mode"],
         "unique_rule_ids": unique_ids,
