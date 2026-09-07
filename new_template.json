@@ -1,0 +1,36 @@
+{
+  "name": "2.2.1.0/24 (failed - copy of 2.1.5.0/24)",
+  "enabled": true,
+  "networks": ["2.2.1.0/24"],
+  "rules": [
+    {
+      "sourceIPs": [],
+      "sourcePorts": ["8080"],
+      "destinationPorts": ["1024"],
+      "protocol": ["17"],
+      "tcpFlags": [],
+      "packetSize": [],
+      "ttl": [],
+      "fragment": "none",
+      "sourceGeo": ["DK", "NZ"],
+      "sourceASN": ["16509"],
+      "action": "allow",
+      "status": "failed"
+    },
+    {
+      "sourceIPs": ["5.62.63.30/32"],
+      "sourcePorts": ["8080"],
+      "destinationPorts": ["1024"],
+      "protocol": ["17"],
+      "tcpFlags": [],
+      "packetSize": [],
+      "ttl": [],
+      "fragment": "none",
+      "sourceGeo": [],
+      "sourceASN": [],
+      "action": "allow",
+      "status": "failed"
+    }
+  ]
+}
+
