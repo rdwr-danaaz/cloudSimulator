@@ -269,7 +269,9 @@ def build_rules(networks: list[str]) -> list[dict[str, Any]]:
                     # provide a safe default even when the user left them blank.
                     rule.setdefault("fragment", "none")
                     rule.setdefault("action", "allow")
-                    rule["status"] = "success"
+                    # Emit the rule's own status when the template sets one
+                    # (e.g. "failed"); otherwise default to "success".
+                    rule["status"] = rt.get("status") or "success"
                     out.append(rule)
     return out
 
@@ -297,6 +299,8 @@ def expand_template(template: dict[str, Any], networks: list[str] | None = None)
                     rule[field] = rt[field]
             rule.setdefault("fragment", "none")
             rule.setdefault("action", "allow")
-            rule["status"] = "success"
+            rule["status"] = rt.get("status") or "success"
             out.append(rule)
     return out
+
+

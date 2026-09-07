@@ -182,6 +182,22 @@ def test_template_dst_always_matches_request():
         _disable_template()
 
 
+def test_template_rule_status_override():
+    """A template rule may carry its own status (e.g. 'failed'); when absent it
+    defaults to 'success'."""
+    client.post("/ui/template", json={
+        "enabled": True,
+        "rules": [
+            {"protocol": ["17"], "status": "failed"},
+            {"protocol": ["6"]},
+        ]})
+    try:
+        body = _post(["203.0.113.0/24"]).json()
+        assert [r["status"] for r in body["rules"]] == ["failed", "success"]
+    finally:
+        _disable_template()
+
+
 def test_template_multiple_networks_and_rules():
     client.post("/ui/template", json={
         "enabled": True,
