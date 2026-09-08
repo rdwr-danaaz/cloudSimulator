@@ -227,6 +227,15 @@ def test_template_preview_does_not_persist():
     assert d["rules"][0]["protocol"] == ["17"]
 
 
+def test_template_preview_honors_rule_status():
+    d = client.post("/ui/template/preview", json={
+        "networks": ["198.51.100.0/24"],
+        "rules": [{"protocol": ["17"], "status": "error"},
+                  {"protocol": ["6"], "status": "learning"},
+                  {"protocol": ["1"]}]}).json()
+    assert [r["status"] for r in d["rules"]] == ["error", "learning", "success"]
+
+
 def test_template_requires_rules():
     assert client.post("/ui/template", json={"enabled": True, "rules": []}).status_code == 400
 

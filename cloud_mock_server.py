@@ -377,7 +377,7 @@ def preview_template(body: TemplatePreviewRequest) -> dict[str, Any]:
                 # ADE requires non-null fragment/action (see response_template).
                 rule.setdefault("fragment", "none")
                 rule.setdefault("action", "allow")
-                rule["status"] = "success"
+                rule["status"] = rt.get("status") or "success"
                 out.append(rule)
         rules = out
     else:

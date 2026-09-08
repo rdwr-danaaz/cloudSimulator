@@ -176,13 +176,16 @@ th{color:#1a3c5e}
         <div><label style="font-weight:normal">Action</label>
           <select id="r_action"><option value="">(unset)</option><option value="allow">allow</option><option value="block">block</option></select>
         </div>
+        <div><label style="font-weight:normal">Status</label>
+          <select id="r_status" title="Recommendation status reported for this rule (blank defaults to success)"><option value="">(default: success)</option><option value="success">success</option><option value="learning">learning</option><option value="error">error</option></select>
+        </div>
       </div>
       <button class="sec" onclick="addRule()" title="Append a rule built from the fields above to the template JSON">&#10133; Add rule</button>
       <button class="sec" onclick="clearRules()" title="Empty the template rules (remember to Save)">&#128465; Clear</button>
 
       <label style="margin-top:18px">Template rules (JSON) &mdash; edit directly if you prefer</label>
       <textarea id="tpl_json" rows="12"></textarea>
-      <p class="hint"><code>destinationIPs</code> is ignored/overwritten per request. A JSON array of rule objects. Blank <code>fragment</code>/<code>action</code> default to <code>none</code>/<code>allow</code> (ADE rejects null values).</p>
+      <p class="hint"><code>destinationIPs</code> is ignored/overwritten per request. A JSON array of rule objects. Blank <code>fragment</code>/<code>action</code> default to <code>none</code>/<code>allow</code> (ADE rejects null values). Blank <code>status</code> defaults to <code>success</code> (other options: <code>learning</code>, <code>error</code>).</p>
       <button onclick="saveTemplate()" title="Persist the template and activate it for all Cyber Controllers">&#128190; Save template</button>
       <button class="sec" onclick="cancelEdit()" title="Discard changes and close the editor">Cancel</button>
 
@@ -439,11 +442,13 @@ function addRule(){
   set("sourceASN",csv(document.getElementById("r_asn").value));
   const frag=document.getElementById("r_frag").value.trim();if(frag)rule.fragment=frag;
   const act=document.getElementById("r_action").value;if(act)rule.action=act;
+  const st=document.getElementById("r_status").value;if(st)rule.status=st;
   let rules;try{rules=currentRules();}catch(e){toast("Existing JSON is invalid: "+e.message,false);return;}
   rules.push(rule);
   document.getElementById("tpl_json").value=JSON.stringify(rules,null,2);
   ["r_proto","r_ttl","r_sport","r_dport","r_sip","r_pkt","r_geo","r_asn","r_frag"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("r_action").value="";
+  document.getElementById("r_status").value="";
   toast("Rule added (remember to Save)");
 }
 /* -- template list rendering -- */
