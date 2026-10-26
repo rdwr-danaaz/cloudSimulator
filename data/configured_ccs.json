@@ -1,0 +1,79 @@
+[
+  {
+    "cc_host": "10.28.100.65",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-08-12T10:55:01Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.205.40.80",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-08-26T04:58:55Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.28.100.11",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-08-26T04:59:20Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.205.50.13",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-09-01T07:06:07Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.205.102.57",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-09-10T11:50:49Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.28.100.103",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-09-15T08:12:40Z",
+    "status": "configured"
+  },
+  {
+    "cc_host": "10.205.180.100",
+    "ssh_user": "root",
+    "ssh_port": 22,
+    "sim_hostport": "10.205.102.81:8080",
+    "ade_container": "config_kvision-anomaly-detection-engine_1",
+    "props_file": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties",
+    "orig_backup": "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data/ade.config.properties.socxsim-orig",
+    "configured_at": "2026-09-22T06:19:20Z",
+    "status": "configured"
+  }
+]

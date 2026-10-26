@@ -1,0 +1,516 @@
+{
+  "templates": [
+    {
+      "id": "default",
+      "name": "77.77.77.0/24",
+      "enabled": true,
+      "networks": [
+        "77.77.77.0/24"
+      ],
+      "rules": [
+        {
+          "protocol": [
+            "6",
+            "17",
+            "132",
+            "50",
+            "89"
+          ],
+          "sourcePorts": [
+            "1024-1054"
+          ],
+          "packetSize": [
+            "128-150"
+          ],
+          "action": "block"
+        },
+        {
+          "protocol": [
+            "47"
+          ],
+          "ttl": [
+            "250-255"
+          ]
+        },
+        {
+          "sourceIPs": [
+            "10.10.10.0/24"
+          ],
+          "sourceGeo": [
+            "Israel"
+          ]
+        },
+        {
+          "protocol": [
+            "17"
+          ],
+          "destinationPorts": [
+            "443"
+          ],
+          "sourceGeo": [
+            "US"
+          ],
+          "action": "allow"
+        }
+      ]
+    },
+    {
+      "id": "130d9cf0a34346cc8e45d9371978f517",
+      "name": "25.25.25.0/24",
+      "enabled": true,
+      "networks": [
+        "25.25.25.0/24"
+      ],
+      "rules": [
+        {
+          "protocol": [
+            "6",
+            "17"
+          ],
+          "ttl": [
+            "64",
+            "128"
+          ],
+          "sourcePorts": [
+            "1000"
+          ],
+          "packetSize": [
+            "128",
+            "512"
+          ],
+          "action": "block"
+        },
+        {
+          "destinationPorts": [
+            "443"
+          ],
+          "sourceIPs": [
+            "5.5.5.5/32"
+          ],
+          "action": "block"
+        }
+      ]
+    },
+    {
+      "id": "08c1513d6e424256a6038cdf99c94633",
+      "name": "99.99.99.0/24",
+      "enabled": true,
+      "networks": [
+        "99.99.99.0/24"
+      ],
+      "rules": [
+        {
+          "protocol": [
+            "6",
+            "17",
+            "132",
+            "50",
+            "89"
+          ],
+          "sourcePorts": [
+            "1024-1054"
+          ],
+          "packetSize": [
+            "128-150"
+          ],
+          "action": "block"
+        },
+        {
+          "protocol": [
+            "47"
+          ],
+          "ttl": [
+            "250-255"
+          ]
+        },
+        {
+          "sourceIPs": [
+            "10.10.10.0/24"
+          ],
+          "sourceGeo": [
+            "Israel"
+          ]
+        },
+        {
+          "protocol": [
+            "17"
+          ],
+          "destinationPorts": [
+            "443"
+          ],
+          "sourceGeo": [
+            "US"
+          ],
+          "action": "allow"
+        }
+      ]
+    },
+    {
+      "id": "0bfc1d4ffebf47ce8cd371d919360a64",
+      "name": "2.1.1.0/24",
+      "enabled": true,
+      "networks": [
+        "2.1.1.0/24"
+      ],
+      "rules": [
+        {
+          "sourcePorts": [
+            "1000"
+          ],
+          "protocol": [
+            "6",
+            "17"
+          ],
+          "packetSize": [
+            "128",
+            "512"
+          ],
+          "ttl": [
+            "64",
+            "128"
+          ],
+          "action": "block",
+          "fragment": "none"
+        },
+        {
+          "sourceIPs": [
+            "5.5.5.5/32"
+          ],
+          "destinationPorts": [
+            "443"
+          ],
+          "action": "block",
+          "fragment": "none"
+        },
+        {
+          "protocol": [
+            "17"
+          ],
+          "ttl": [
+            "128"
+          ],
+          "sourceGeo": [
+            "US"
+          ],
+          "sourceASN": [
+            "7012"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ac7731f6b12a460a9b394fbc7f5c3887",
+      "name": "2.1.4.0/24",
+      "enabled": true,
+      "networks": [
+        "2.1.4.0/24"
+      ],
+      "rules": [
+        {
+          "sourceIPs": [
+            "5.83.149.1/32"
+          ],
+          "sourcePorts": [],
+          "destinationPorts": [],
+          "protocol": [
+            "2"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "1400-1518"
+          ],
+          "ttl": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [
+            "5.101.86.1/32"
+          ],
+          "sourcePorts": [],
+          "destinationPorts": [],
+          "protocol": [
+            "2"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "1400-1518"
+          ],
+          "ttl": [
+            "255"
+          ],
+          "fragment": "none",
+          "sourceGeo": [
+            "CA"
+          ],
+          "sourceASN": [
+            "62563"
+          ],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [
+            "5.101.96.1/32"
+          ],
+          "sourcePorts": [],
+          "destinationPorts": [],
+          "protocol": [
+            "2"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "512-1024"
+          ],
+          "ttl": [
+            "128"
+          ],
+          "fragment": "none",
+          "sourceGeo": [
+            "NL"
+          ],
+          "sourceASN": [
+            "14061"
+          ],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [],
+          "sourcePorts": [
+            "1024"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "6"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "1496",
+            "1500"
+          ],
+          "ttl": [
+            "255"
+          ],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [],
+          "sourcePorts": [
+            "80"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "17"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "1496",
+            "1500"
+          ],
+          "ttl": [
+            "255"
+          ],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [],
+          "sourcePorts": [],
+          "destinationPorts": [],
+          "protocol": [
+            "1"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "512-1024"
+          ],
+          "ttl": [
+            "255"
+          ],
+          "fragment": "none",
+          "sourceGeo": [
+            "EG"
+          ],
+          "sourceASN": [
+            "16509"
+          ],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [
+            "5.83.149.1/32"
+          ],
+          "sourcePorts": [],
+          "destinationPorts": [],
+          "protocol": [
+            "2"
+          ],
+          "tcpFlags": [],
+          "packetSize": [
+            "64-128"
+          ],
+          "ttl": [
+            "64"
+          ],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow"
+        }
+      ]
+    },
+    {
+      "id": "7af47f780fea4230883ad1a54a67a6e9",
+      "name": "2.1.5.0/24",
+      "enabled": true,
+      "networks": [
+        "2.1.5.0/24"
+      ],
+      "rules": [
+        {
+          "sourceIPs": [],
+          "sourcePorts": [
+            "8080"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "17"
+          ],
+          "tcpFlags": [],
+          "packetSize": [],
+          "ttl": [],
+          "fragment": "none",
+          "sourceGeo": [
+            "DK",
+            "NZ"
+          ],
+          "sourceASN": [
+            "16509"
+          ],
+          "action": "allow"
+        },
+        {
+          "sourceIPs": [
+            "5.62.63.30/32"
+          ],
+          "sourcePorts": [
+            "8080"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "17"
+          ],
+          "tcpFlags": [],
+          "packetSize": [],
+          "ttl": [],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow"
+        },
+        {
+          "protocol": [
+            "17"
+          ],
+          "packetSize": [
+            "512"
+          ],
+          "sourceASN": []
+        },
+        {
+          "protocol": [
+            "6"
+          ],
+          "ttl": [
+            "88"
+          ],
+          "sourcePorts": [
+            "88"
+          ],
+          "sourceIPs": [
+            "8.8.8.8/32"
+          ],
+          "sourceGeo": [
+            "FI"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "c9a8806014d54086b50f9a46c4064a8b",
+      "name": "2.2.1.0/24 (error - copy of 2.1.5.0/24)",
+      "enabled": true,
+      "networks": [
+        "2.2.1.0/24"
+      ],
+      "rules": [
+        {
+          "sourceIPs": [],
+          "sourcePorts": [
+            "8080"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "17"
+          ],
+          "tcpFlags": [],
+          "packetSize": [],
+          "ttl": [],
+          "fragment": "none",
+          "sourceGeo": [
+            "DK",
+            "NZ"
+          ],
+          "sourceASN": [
+            "16509"
+          ],
+          "action": "allow",
+          "status": "error"
+        },
+        {
+          "sourceIPs": [
+            "5.62.63.30/32"
+          ],
+          "sourcePorts": [
+            "8080"
+          ],
+          "destinationPorts": [
+            "1024"
+          ],
+          "protocol": [
+            "17"
+          ],
+          "tcpFlags": [],
+          "packetSize": [],
+          "ttl": [],
+          "fragment": "none",
+          "sourceGeo": [],
+          "sourceASN": [],
+          "action": "allow",
+          "status": "error"
+        }
+      ]
+    }
+  ]
+}
