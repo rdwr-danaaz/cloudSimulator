@@ -597,3 +597,156 @@ def test_configure_without_address_uses_host_header():
     body = r.json()
     assert body["ok"] is False
 
+
+# --------------------------------------------------------------------------- #
+# Attack-time remediation flow (Remediation Recommendations tab)
+# --------------------------------------------------------------------------- #
+import attack_mitigation
+from cloud_mock_server import attack_sessions
+
+INIT = "/api/sdcc/genai/core/analysis/attack/_initiateAttackAnalysis"
+GETMIT = "/api/sdcc/genai/core/analysis/attack/_getMitigation"
+CLOSE = "/api/sdcc/genai/core/analysis/attack/_closeAttack"
+
+
+@pytest.fixture(autouse=True)
+def reset_attack_state():
+    """Clear attack-mitigation definitions and live sessions between tests."""
+    for m in attack_mitigation.list_mitigations():
+        attack_mitigation.delete_mitigation(m["id"])
+    attack_sessions.clear()
+    yield
+    for m in attack_mitigation.list_mitigations():
+        attack_mitigation.delete_mitigation(m["id"])
+    attack_sessions.clear()
+
+
+def _add_mitigation(**over):
+    body = {
+        "name": over.get("name", "test mitigation"),
+        "enabled": over.get("enabled", True),
+        "networks": over.get("networks", ["2.1.5.0/24"]),
+        "isPartialMitigated": over.get("isPartialMitigated", False),
+        "progressive": over.get("progressive", False),
+        "progressivePolls": over.get("progressivePolls", 3),
+        "geolocationFilters": over.get("geolocationFilters",
+                                       [{"country": "CN", "attackBlockagePercentage": 80}]),
+        "trafficFilters": over.get("trafficFilters", [
+            {"priority": 1, "filterMode": "DROP",
+             "filterCriteria": {"dst_ip": "2.1.5.0/24", "protocol": "tcp"}}]),
+    }
+    r = client.post("/ui/attack-mitigations", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()["mitigation"]
+
+
+def test_attack_lifecycle_static():
+    _add_mitigation(networks=["2.1.5.0/24"])
+    r = client.post(INIT, json={"networks": ["2.1.5.0/24"]})
+    assert r.status_code == 200
+    uid = r.json()["uid"]
+    assert uid
+    for _ in range(3):
+        m = client.get(GETMIT, params={"uid": uid}).json()
+        assert m["type"] == "MITIGATION"
+        assert m["attackId"] == uid
+        assert len(m["trafficFilters"]) == 1
+        assert len(m["geolocationFilters"]) == 1
+        assert m["isPartialMitigated"] is False
+        assert "filterHashCode" in m["trafficFilters"][0]
+    c = client.post(CLOSE, params={"uid": uid})
+    assert c.status_code == 200 and c.json()["closed"] is True
+    assert client.get(GETMIT, params={"uid": uid}).status_code == 500
+
+
+def test_attack_progressive_reveals_over_polls():
+    _add_mitigation(
+        networks=["9.9.9.0/24"], progressive=True, progressivePolls=3,
+        geolocationFilters=[{"country": "CN"}, {"country": "RU"}, {"country": "IR"}],
+        trafficFilters=[
+            {"priority": 1, "filterMode": "DROP", "filterCriteria": {"dst_ip": "9.9.9.0/24"}},
+            {"priority": 2, "filterMode": "DROP", "filterCriteria": {"dst_ip": "9.9.9.1/32"}},
+            {"priority": 3, "filterMode": "DROP", "filterCriteria": {"dst_ip": "9.9.9.2/32"}},
+        ],
+    )
+    uid = client.post(INIT, json={"networks": ["9.9.9.0/24"]}).json()["uid"]
+    counts = []
+    partials = []
+    for _ in range(3):
+        m = client.get(GETMIT, params={"uid": uid}).json()
+        counts.append(len(m["trafficFilters"]))
+        partials.append(m["isPartialMitigated"])
+    assert counts == [1, 2, 3]
+    assert partials[0] is True and partials[-1] is False
+
+
+def test_attack_no_matching_definition_is_empty_learning():
+    uid = client.post(INIT, json={"networks": ["203.0.113.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert m["trafficFilters"] == [] and m["geolocationFilters"] == []
+    assert m["isPartialMitigated"] is True
+
+
+def test_attack_catch_all_definition_matches_any_network():
+    _add_mitigation(name="catch-all", networks=[])
+    uid = client.post(INIT, json={"networks": ["198.51.100.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert len(m["trafficFilters"]) == 1
+
+
+def test_attack_exact_network_wins_over_catch_all():
+    _add_mitigation(name="catch-all", networks=[],
+                    trafficFilters=[{"priority": 9, "filterMode": "ALLOW",
+                                     "filterCriteria": {"dst_ip": "0.0.0.0/0"}}])
+    _add_mitigation(name="exact", networks=["7.7.7.0/24"],
+                    trafficFilters=[{"priority": 1, "filterMode": "DROP",
+                                     "filterCriteria": {"dst_ip": "7.7.7.0/24"}}])
+    uid = client.post(INIT, json={"networks": ["7.7.7.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert m["trafficFilters"][0]["filterMode"] == "DROP"
+
+
+def test_attack_initiate_rejects_bad_network():
+    r = client.post(INIT, json={"networks": ["not-a-cidr"]})
+    assert r.status_code == 422
+
+
+def test_getmitigation_unknown_uid_fails():
+    assert client.get(GETMIT, params={"uid": "deadbeef"}).status_code == 500
+
+
+def test_attack_mitigation_crud_and_preview():
+    m = _add_mitigation(name="crud demo", progressive=True, progressivePolls=2)
+    lst = client.get("/ui/attack-mitigations").json()["mitigations"]
+    assert any(x["id"] == m["id"] for x in lst)
+    pv = client.post("/ui/attack-mitigations/preview", json={
+        "progressive": True, "progressivePolls": 2,
+        "trafficFilters": [
+            {"priority": 1, "filterMode": "DROP", "filterCriteria": {}},
+            {"priority": 2, "filterMode": "DROP", "filterCriteria": {}},
+        ],
+        "geolocationFilters": [],
+    }).json()
+    assert pv["static"]["type"] == "MITIGATION"
+    assert len(pv["progressive"]) == 2
+    assert client.delete(f"/ui/attack-mitigations/{m['id']}").status_code == 200
+    assert client.delete(f"/ui/attack-mitigations/{m['id']}").status_code == 404
+
+
+def test_attack_mitigation_requires_a_filter():
+    r = client.post("/ui/attack-mitigations", json={
+        "name": "empty", "geolocationFilters": [], "trafficFilters": []})
+    assert r.status_code == 400
+
+
+def test_attack_sessions_listing_and_delete():
+    _add_mitigation(networks=["2.1.5.0/24"])
+    uid = client.post(INIT, json={"networks": ["2.1.5.0/24"]}).json()["uid"]
+    client.get(GETMIT, params={"uid": uid})
+    sessions = client.get("/ui/attack-sessions").json()["sessions"]
+    s = next(x for x in sessions if x["uid"] == uid)
+    assert s["poll_count"] == 1 and s["closed"] is False
+    assert client.delete(f"/ui/attack-sessions/{uid}").status_code == 200
+
+
+

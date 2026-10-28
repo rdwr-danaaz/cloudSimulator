@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from permanent_responses import permanent_rules_for, PERMANENT_NETWORK_RULES
 import response_template
+import attack_mitigation
 import cc_manager
 import netvalidate
 import netgen
@@ -39,6 +40,17 @@ _ACCOUNT_ID = "67d6a0d9c39077bed7e1f23e"
 #       "mode", "count", "created_at", "rules": [...]
 #   }
 cc_sets: dict[str, dict[str, Any]] = {}
+
+# Live attack-remediation sessions, keyed by the attack ``uid`` returned from
+# _initiateAttackAnalysis. A session exists from "attack started" until
+# _closeAttack is called. Each poll of _getMitigation advances poll_count, which
+# drives progressive (gradually-revealed) mitigations.
+#   attack_sessions[uid] = {
+#       "uid", "account_id", "networks", "mitigation_suggestions_only",
+#       "definition_id", "definition_name", "progressive", "poll_count",
+#       "start_ts", "started_at", "updated_at", "closed", "closed_at"
+#   }
+attack_sessions: dict[str, dict[str, Any]] = {}
 
 
 @app.exception_handler(RequestValidationError)
@@ -151,8 +163,39 @@ class ResetCCRequest(BaseModel):
     restart: bool = True
 
 
+class InitiateAttackRequest(BaseModel):
+    # A Cyber Controller opens an attack session with the destination network(s)
+    # under attack. Mirrors the cloud _initiateAttackAnalysis contract.
+    account_id: str | None = None
+    networks: list[str] = Field(min_length=1)
+    mitigation_suggestions_only: bool = False
+
+    @field_validator("networks")
+    @classmethod
+    def _validate_networks(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("at least one network under attack is required, e.g. [\"2.1.5.0/24\"].")
+        for n in v:
+            netvalidate.validate_cidr(n, field="attack network")
+        return v
+
+
+class AttackMitigationUpsertRequest(BaseModel):
+    name: str = ""
+    enabled: bool = True
+    networks: list[str] = Field(default_factory=list)
+    isPartialMitigated: bool = False
+    progressive: bool = False
+    progressivePolls: int = 3
+    geolocationFilters: list[dict[str, Any]] = Field(default_factory=list)
+    trafficFilters: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+def _epoch_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 def _interval_for_now() -> dict[str, str]:
     now = datetime.now(timezone.utc)
@@ -281,6 +324,167 @@ def get_recommendation(request: GetRecommendationRequest, http: Request) -> dict
         },
         "timestamp": _iso_now(),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Attack-time remediation flow (Remediation Recommendations tab)
+#   1. CC opens a session:  POST .../attack/_initiateAttackAnalysis -> {uid}
+#   2. CC polls for the evolving mitigation (~every 15s while the attack is on):
+#                           GET  .../attack/_getMitigation?uid=<uid>
+#   3. CC closes the attack: POST .../attack/_closeAttack?uid=<uid>
+# --------------------------------------------------------------------------- #
+import uuid as _uuid
+
+
+@app.post("/api/sdcc/genai/core/analysis/attack/_initiateAttackAnalysis")
+def initiate_attack(request: InitiateAttackRequest, http: Request) -> dict[str, Any]:
+    """Open an attack-remediation session for the network(s) under attack and
+    return its ``uid``. The CC then polls _getMitigation with this uid until it
+    calls _closeAttack."""
+    defn = attack_mitigation.match_definition(request.networks)
+    progressive = bool(defn and defn.get("progressive"))
+    uid = _uuid.uuid4().hex
+    now = _epoch_ms()
+    attack_sessions[uid] = {
+        "uid": uid,
+        "account_id": request.account_id or _ACCOUNT_ID,
+        "networks": request.networks,
+        "mitigation_suggestions_only": request.mitigation_suggestions_only,
+        "definition_id": defn.get("id") if defn else None,
+        "definition_name": defn.get("name") if defn else None,
+        "progressive": progressive,
+        "poll_count": 0,
+        "start_ts": now,
+        "started_at": _iso_now(),
+        "updated_at": _iso_now(),
+        "closed": False,
+        "closed_at": None,
+    }
+    return {"uid": uid}
+
+
+@app.get("/api/sdcc/genai/core/analysis/attack/_getMitigation")
+def get_mitigation(uid: str) -> dict[str, Any]:
+    """Return the current mitigation for an ongoing attack session. Each call
+    advances the poll counter, which drives a progressive mitigation to reveal
+    more filters over time (or returns the full static mitigation each time)."""
+    session = attack_sessions.get(uid)
+    if session is None or session.get("closed"):
+        raise HTTPException(status_code=500, detail=f"No active attack session for uid '{uid}'")
+    session["poll_count"] = int(session.get("poll_count", 0)) + 1
+    session["updated_at"] = _iso_now()
+    defn = (attack_mitigation.get_mitigation(session["definition_id"])
+            if session.get("definition_id") else None)
+    # Re-match if the originally matched definition was deleted mid-attack.
+    if defn is None and session.get("definition_id"):
+        defn = attack_mitigation.match_definition(session["networks"])
+    elif session.get("definition_id") is None:
+        defn = attack_mitigation.match_definition(session["networks"])
+    return attack_mitigation.build_mitigation_response(
+        defn,
+        poll_count=session["poll_count"],
+        progressive=bool(session.get("progressive")),
+        account_id=session["account_id"],
+        attack_id=uid,
+        start_ts=session["start_ts"],
+        now_ts=_epoch_ms(),
+    )
+
+
+@app.post("/api/sdcc/genai/core/analysis/attack/_closeAttack")
+def close_attack(uid: str) -> dict[str, Any]:
+    """Close an attack session once the attack has ended."""
+    session = attack_sessions.get(uid)
+    if session is None:
+        raise HTTPException(status_code=500, detail=f"No attack session for uid '{uid}'")
+    session["closed"] = True
+    session["closed_at"] = _iso_now()
+    return {"uid": uid, "closed": True}
+
+
+# --- Remediation Recommendations tab: manage attack-mitigation definitions ---
+@app.get("/ui/attack-mitigations")
+def list_attack_mitigations() -> dict[str, Any]:
+    return {"mitigations": attack_mitigation.list_mitigations()}
+
+
+@app.post("/ui/attack-mitigations", status_code=201)
+def create_attack_mitigation(body: AttackMitigationUpsertRequest) -> dict[str, Any]:
+    try:
+        defn = attack_mitigation.add_mitigation(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"created": True, "mitigation": defn}
+
+
+@app.put("/ui/attack-mitigations/{def_id}")
+def edit_attack_mitigation(def_id: str, body: AttackMitigationUpsertRequest) -> dict[str, Any]:
+    try:
+        defn = attack_mitigation.update_mitigation(def_id, body.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Mitigation '{def_id}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"saved": True, "mitigation": defn}
+
+
+@app.delete("/ui/attack-mitigations/{def_id}")
+def remove_attack_mitigation(def_id: str) -> dict[str, Any]:
+    if not attack_mitigation.delete_mitigation(def_id):
+        raise HTTPException(status_code=404, detail=f"Mitigation '{def_id}' not found")
+    return {"removed": def_id}
+
+
+@app.post("/ui/attack-mitigations/preview")
+def preview_attack_mitigation(body: AttackMitigationUpsertRequest) -> dict[str, Any]:
+    """Preview how a (possibly unsaved) definition would be returned across polls.
+
+    Shows the static response and, when ``progressive`` is set, the sequence of
+    responses a CC would receive on successive _getMitigation polls."""
+    defn = attack_mitigation._coerce(body.model_dump())
+    start_ts = _epoch_ms()
+    static = attack_mitigation.build_mitigation_response(
+        defn, poll_count=1, progressive=False,
+        account_id=_ACCOUNT_ID, attack_id="preview", start_ts=start_ts, now_ts=start_ts)
+    progressive_polls: list[dict[str, Any]] = []
+    if defn.get("progressive"):
+        total = max(1, int(defn.get("progressivePolls") or 3))
+        for p in range(1, total + 1):
+            progressive_polls.append(attack_mitigation.build_mitigation_response(
+                defn, poll_count=p, progressive=True,
+                account_id=_ACCOUNT_ID, attack_id="preview",
+                start_ts=start_ts, now_ts=start_ts))
+    return {"static": static, "progressive": progressive_polls}
+
+
+@app.get("/ui/attack-sessions")
+def list_attack_sessions() -> dict[str, Any]:
+    """List live/closed attack sessions (summaries) for the UI."""
+    out = []
+    for s in attack_sessions.values():
+        out.append({
+            "uid": s["uid"],
+            "networks": s["networks"],
+            "definition_name": s.get("definition_name"),
+            "progressive": s.get("progressive"),
+            "poll_count": s.get("poll_count", 0),
+            "mitigation_suggestions_only": s.get("mitigation_suggestions_only"),
+            "started_at": s.get("started_at"),
+            "updated_at": s.get("updated_at"),
+            "closed": s.get("closed"),
+            "closed_at": s.get("closed_at"),
+        })
+    # Most recently updated first.
+    out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    return {"sessions": out}
+
+
+@app.delete("/ui/attack-sessions/{uid}")
+def delete_attack_session(uid: str) -> dict[str, Any]:
+    if uid not in attack_sessions:
+        raise HTTPException(status_code=404, detail=f"No attack session '{uid}'")
+    del attack_sessions[uid]
+    return {"removed": uid}
 
 
 # --------------------------------------------------------------------------- #

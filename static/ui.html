@@ -88,6 +88,9 @@ th{color:#1a3c5e}
     <div class="navbtn" data-tab="rec" onclick="switchTab('rec')">
       <span class="ic">&#128218;</span><span>Recommendations<small>Browse &amp; copy</small></span>
     </div>
+    <div class="navbtn" data-tab="attack" onclick="switchTab('attack')">
+      <span class="ic">&#128680;</span><span>Remediation Recommendations<small>Attack-time mitigation</small></span>
+    </div>
     <div class="navbtn" data-tab="scale" onclick="switchTab('scale')">
       <span class="ic">&#128200;</span><span>Scale test<small>Generate at scale</small></span>
     </div>
@@ -215,6 +218,95 @@ th{color:#1a3c5e}
     </div>
   </section>
 
+  <!-- ============ TAB 3b: REMEDIATION RECOMMENDATIONS (attack-time) ============ -->
+  <section class="panel" id="panel-attack">
+    <div class="card">
+      <h2>&#128680; Attack-time mitigation</h2>
+      <p class="sub">
+        When an attack starts, a Cyber Controller opens an <b>attack session</b>
+        (<code>_initiateAttackAnalysis</code>) and then <b>polls continuously</b>
+        (<code>_getMitigation</code>, ~every 15s) for an evolving mitigation until
+        the attack ends (<code>_closeAttack</code>). Define below <b>what mitigation</b>
+        the simulator returns for an attack on a given destination network. These
+        <b>attack-mitigation definitions are separate from the peacetime Templates</b>.
+      </p>
+      <div class="callout">
+        <b>Static</b> &mdash; every poll returns the full mitigation.
+        <b>Progressive</b> &mdash; the mitigation is revealed gradually over N polls
+        (filters appear over time and <code>isPartialMitigated</code> flips to
+        <code>false</code> once fully mitigated), simulating the AI learning during
+        an ongoing attack.
+      </div>
+      <div id="atk_list">Loading&hellip;</div>
+      <button class="sec small" style="margin-top:10px" onclick="newMitigation()" title="Create a new attack-mitigation definition">&#10133; New mitigation</button>
+      <button class="sec small" style="margin-top:10px" onclick="loadMitigations()" title="Reload the list">&#128260; Refresh</button>
+    </div>
+
+    <div class="card" id="atk_editor" style="display:none">
+      <h2 id="atk_editor_title">&#128680; New mitigation <span class="badge off" id="atk_badge">inactive</span></h2>
+      <label>Definition name</label>
+      <input id="atk_name" placeholder="e.g. UDP flood mitigation for 2.1.5.0/24">
+      <label>Attack network(s) (csv) &mdash; leave blank for a catch-all</label>
+      <input id="atk_net" value="" title="Destination network(s) under attack this definition matches; blank = any attack.">
+      <p class="hint">Blank = catch-all (matches any attack that has no exact-network definition).</p>
+      <div class="switch">
+        <input type="checkbox" id="atk_enabled" onchange="renderAtkBadge()">
+        <label style="margin:0">Use this definition for attacks (off = saved but inactive)</label>
+      </div>
+      <div class="row">
+        <div class="f">
+          <div class="switch"><input type="checkbox" id="atk_progressive" onchange="atkProgChanged()"><label style="margin:0">Progressive (reveal gradually over polls)</label></div>
+        </div>
+        <div class="f" style="max-width:220px;display:none" id="atk_pollswrap">
+          <label>Polls to full mitigation</label>
+          <input id="atk_polls" type="number" min="1" value="3" title="How many _getMitigation polls it takes a progressive definition to reach full mitigation">
+        </div>
+      </div>
+      <div class="switch"><input type="checkbox" id="atk_partial"><label style="margin:0">Report <code>isPartialMitigated = true</code> (static mode only)</label></div>
+
+      <hr style="margin:18px 0;border:none;border-top:1px solid #eee">
+      <h3 style="margin:0 0 4px;color:#1a3c5e;font-size:1rem">&#127757; Geolocation filters</h3>
+      <div class="grid2">
+        <div><label style="font-weight:normal">Country code</label><input id="g_country" placeholder="CN"></div>
+        <div><label style="font-weight:normal">Attack blockage %</label><input id="g_pct" placeholder="80"></div>
+      </div>
+      <button class="sec small" onclick="addGeoFilter()" title="Append this geolocation filter">&#10133; Add geo filter</button>
+
+      <h3 style="margin:16px 0 4px;color:#1a3c5e;font-size:1rem">&#128737; Traffic filters</h3>
+      <div class="grid2">
+        <div><label style="font-weight:normal">Priority</label><input id="t_prio" placeholder="1"></div>
+        <div><label style="font-weight:normal">Filter mode</label>
+          <select id="t_mode"><option value="DROP">DROP</option><option value="ALLOW">ALLOW</option><option value="RATE_LIMIT">RATE_LIMIT</option></select>
+        </div>
+        <div><label style="font-weight:normal">Blockage bps %</label><input id="t_bps" placeholder="90"></div>
+        <div><label style="font-weight:normal">Blockage pps %</label><input id="t_pps" placeholder="85"></div>
+        <div><label style="font-weight:normal">Src IP</label><input id="t_sip" placeholder="5.5.5.0/24"></div>
+        <div><label style="font-weight:normal">Dst IP</label><input id="t_dip" placeholder="2.1.5.0/24"></div>
+        <div><label style="font-weight:normal">Src port</label><input id="t_sport" placeholder="1024"></div>
+        <div><label style="font-weight:normal">Dst port</label><input id="t_dport" placeholder="80"></div>
+        <div><label style="font-weight:normal">Protocol</label><input id="t_proto" placeholder="tcp"></div>
+        <div><label style="font-weight:normal">Protocol id</label><input id="t_protoid" placeholder="6"></div>
+      </div>
+      <button class="sec small" onclick="addTrafficFilter()" title="Append this traffic filter">&#10133; Add traffic filter</button>
+
+      <label style="margin-top:18px">Filters (JSON) &mdash; edit directly if you prefer</label>
+      <textarea id="atk_json" rows="12">{"geolocationFilters":[],"trafficFilters":[]}</textarea>
+      <p class="hint">A JSON object with <code>geolocationFilters</code> and <code>trafficFilters</code> arrays. <code>filterHashCode</code> is generated automatically.</p>
+      <button onclick="saveMitigation()" title="Persist this attack-mitigation definition">&#128190; Save mitigation</button>
+      <button class="sec" onclick="cancelMitEdit()" title="Discard changes and close the editor">Cancel</button>
+      <button class="sec" onclick="previewMitigation()" title="See the static response and the per-poll progressive sequence">&#9654; Preview polls</button>
+      <pre class="log" id="atk_preview" style="display:none"></pre>
+    </div>
+
+    <div class="card">
+      <h2>&#128225; Live attack sessions
+        <button class="sec small" style="float:right" onclick="loadAttackSessions()" title="Reload live attack sessions">&#128260; Refresh</button>
+      </h2>
+      <p class="sub">Attack sessions opened by Cyber Controllers (<code>_initiateAttackAnalysis</code>). Each shows how many times the CC has polled <code>_getMitigation</code>.</p>
+      <div id="atk_sessions">Loading&hellip;</div>
+    </div>
+  </section>
+
   <!-- ============ TAB 4: SCALE TEST ============ -->
   <section class="panel" id="panel-scale">
     <div class="card">
@@ -314,9 +406,11 @@ function switchTab(name){
   document.getElementById("panel-cc").classList.toggle("active",name==="cc");
   document.getElementById("panel-tpl").classList.toggle("active",name==="tpl");
   document.getElementById("panel-rec").classList.toggle("active",name==="rec");
+  document.getElementById("panel-attack").classList.toggle("active",name==="attack");
   document.getElementById("panel-scale").classList.toggle("active",name==="scale");
   if(name==="rec")loadRecs();
   if(name==="tpl")loadTemplates();
+  if(name==="attack"){loadMitigations();loadAttackSessions();}
   if(name==="scale"){scaleModeChanged();loadCcSets();}
 }
 function copyAddr(){navigator.clipboard.writeText(SIM_ADDR).then(()=>toast("Endpoint copied"));}
@@ -653,9 +747,158 @@ function copyModalToTemplate(){
 }
 document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id==="jsonmodal")closeModal();});
 
+/* ---------- Tab 3b: remediation recommendations (attack-time) ---------- */
+let MITIGATIONS = [];
+let MIT_EDIT_ID = null;
+function atkFilters(){const raw=document.getElementById("atk_json").value.trim();const o=raw?JSON.parse(raw):{};return {geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]};}
+function setAtkFilters(o){document.getElementById("atk_json").value=JSON.stringify({geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]},null,2);}
+function renderAtkBadge(){const on=document.getElementById("atk_enabled").checked;const b=document.getElementById("atk_badge");b.textContent=on?"active":"inactive";b.className="badge "+(on?"on":"off");}
+function atkProgChanged(){const on=document.getElementById("atk_progressive").checked;document.getElementById("atk_pollswrap").style.display=on?"block":"none";}
+async function loadMitigations(){
+  const el=document.getElementById("atk_list");
+  try{
+    const d=await(await fetch("/ui/attack-mitigations")).json();
+    MITIGATIONS=d.mitigations||[];
+    if(!MITIGATIONS.length){el.innerHTML='<span style="color:#888">No attack-mitigation definitions yet. Click <b>New mitigation</b> to create one.</span>';return;}
+    el.innerHTML='<table><tr><th>Name</th><th>Networks</th><th>Geo</th><th>Traffic</th><th>Mode</th><th>Status</th><th></th></tr>'+
+      MITIGATIONS.map(m=>{
+        const nets=(m.networks&&m.networks.length)?escapeHtml(m.networks.join(", ")):'<span style="opacity:.6">any attack</span>';
+        const mode=m.progressive?('progressive ('+(m.progressivePolls||3)+' polls)'):'static';
+        const st=m.enabled?'<span class="badge on">active</span>':'<span class="badge off">inactive</span>';
+        return `<tr>
+          <td><b>${escapeHtml(m.name||"Mitigation")}</b></td>
+          <td>${nets}</td>
+          <td>${(m.geolocationFilters||[]).length}</td>
+          <td>${(m.trafficFilters||[]).length}</td>
+          <td>${escapeHtml(mode)}</td>
+          <td>${st}</td>
+          <td style="white-space:nowrap">
+            <button class="small" onclick="editMitigation('${m.id}')" title="Edit">&#9998; Edit</button>
+            <button class="sec small" style="margin-left:6px" onclick="toggleMitigation('${m.id}')" title="Enable/disable">${m.enabled?'Disable':'Enable'}</button>
+            <button class="danger small" style="margin-left:6px" onclick="deleteMitigation('${m.id}')" title="Delete">&#128465;</button>
+          </td></tr>`;}).join("")+'</table>';
+  }catch(e){el.textContent="Could not load mitigations.";}
+}
+function fillMitEditor(m){
+  MIT_EDIT_ID=m?m.id:null;
+  document.getElementById("atk_editor").style.display="block";
+  document.getElementById("atk_editor_title").innerHTML=(m?"&#9998; Edit mitigation":"&#128680; New mitigation")+' <span class="badge off" id="atk_badge">inactive</span>';
+  document.getElementById("atk_name").value=m?(m.name||""):"";
+  document.getElementById("atk_net").value=m?((m.networks||[]).join(",")):"";
+  document.getElementById("atk_enabled").checked=m?!!m.enabled:true;
+  document.getElementById("atk_progressive").checked=m?!!m.progressive:false;
+  document.getElementById("atk_polls").value=m?(m.progressivePolls||3):3;
+  document.getElementById("atk_partial").checked=m?!!m.isPartialMitigated:false;
+  setAtkFilters(m||{});
+  document.getElementById("atk_preview").style.display="none";
+  renderAtkBadge();atkProgChanged();
+  document.getElementById("atk_editor").scrollIntoView({behavior:"smooth"});
+}
+function newMitigation(){fillMitEditor(null);}
+function editMitigation(id){const m=MITIGATIONS.find(x=>x.id===id);if(m)fillMitEditor(m);}
+function cancelMitEdit(){document.getElementById("atk_editor").style.display="none";MIT_EDIT_ID=null;}
+function addGeoFilter(){
+  const country=document.getElementById("g_country").value.trim();
+  if(!country){toast("Country code is required",false);return;}
+  const pct=parseInt(document.getElementById("g_pct").value);
+  let o;try{o=atkFilters();}catch(e){toast("Filters JSON invalid: "+e.message,false);return;}
+  o.geolocationFilters.push({country,attackBlockagePercentage:isNaN(pct)?0:pct,applied:true});
+  setAtkFilters(o);
+  document.getElementById("g_country").value="";document.getElementById("g_pct").value="";
+  toast("Geo filter added (remember to Save)");
+}
+function addTrafficFilter(){
+  const g=id=>document.getElementById(id).value.trim();
+  const crit={};const setc=(k,v)=>{if(v)crit[k]=v;};
+  setc("src_ip",g("t_sip"));setc("dst_ip",g("t_dip"));setc("src_port",g("t_sport"));
+  setc("dst_port",g("t_dport"));setc("protocol",g("t_proto"));
+  const pid=parseInt(g("t_protoid"));if(!isNaN(pid))crit.protocol_id=pid;
+  const bps=parseInt(g("t_bps")),pps=parseInt(g("t_pps")),prio=parseInt(g("t_prio"));
+  const f={priority:isNaN(prio)?1:prio,
+    attackBlockagePercentage:{bps:isNaN(bps)?0:bps,pps:isNaN(pps)?0:pps},
+    filterCriteria:crit,filterMode:document.getElementById("t_mode").value,applied:true};
+  let o;try{o=atkFilters();}catch(e){toast("Filters JSON invalid: "+e.message,false);return;}
+  o.trafficFilters.push(f);
+  setAtkFilters(o);
+  ["t_prio","t_bps","t_pps","t_sip","t_dip","t_sport","t_dport","t_proto","t_protoid"].forEach(id=>document.getElementById(id).value="");
+  toast("Traffic filter added (remember to Save)");
+}
+function mitBody(){
+  let o;try{o=atkFilters();}catch(e){toast("Filters JSON invalid: "+e.message,false);return null;}
+  return {
+    name:document.getElementById("atk_name").value.trim(),
+    enabled:document.getElementById("atk_enabled").checked,
+    networks:csv(document.getElementById("atk_net").value),
+    isPartialMitigated:document.getElementById("atk_partial").checked,
+    progressive:document.getElementById("atk_progressive").checked,
+    progressivePolls:parseInt(document.getElementById("atk_polls").value)||3,
+    geolocationFilters:o.geolocationFilters,
+    trafficFilters:o.trafficFilters
+  };
+}
+async function saveMitigation(){
+  const body=mitBody();if(!body)return;
+  if(!body.geolocationFilters.length && !body.trafficFilters.length){toast("Add at least one geo or traffic filter",false);return;}
+  const url=MIT_EDIT_ID?("/ui/attack-mitigations/"+encodeURIComponent(MIT_EDIT_ID)):"/ui/attack-mitigations";
+  const method=MIT_EDIT_ID?"PUT":"POST";
+  const r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){toast(MIT_EDIT_ID?"Mitigation saved":"Mitigation created");cancelMitEdit();loadMitigations();}
+  else{const d=await readJson(r);toast("Save failed: "+(d.detail||""),false);}
+}
+async function toggleMitigation(id){
+  const m=MITIGATIONS.find(x=>x.id===id);if(!m)return;
+  const body=Object.assign({},m,{enabled:!m.enabled});
+  const r=await fetch("/ui/attack-mitigations/"+encodeURIComponent(id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){toast(m.enabled?"Disabled":"Enabled");loadMitigations();}else{toast("Update failed",false);}
+}
+async function deleteMitigation(id){
+  const m=MITIGATIONS.find(x=>x.id===id);
+  if(!confirm('Delete mitigation "'+((m&&m.name)||id)+'"?'))return;
+  const r=await fetch("/ui/attack-mitigations/"+encodeURIComponent(id),{method:"DELETE"});
+  if(r.ok){toast("Deleted");if(MIT_EDIT_ID===id)cancelMitEdit();loadMitigations();}else{toast("Delete failed",false);}
+}
+async function previewMitigation(){
+  const body=mitBody();if(!body)return;
+  const r=await fetch("/ui/attack-mitigations/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const d=await readJson(r);
+  const out=document.getElementById("atk_preview");out.style.display="block";
+  if(!r.ok){out.textContent="\u274C "+(d.detail||"Preview failed");return;}
+  let txt="STATIC (every poll returns this):\n"+JSON.stringify(d.static,null,2);
+  if(d.progressive&&d.progressive.length){
+    txt+="\n\nPROGRESSIVE sequence (one entry per poll):\n";
+    d.progressive.forEach((p,i)=>{txt+="\n--- poll "+(i+1)+" (isPartialMitigated="+p.isPartialMitigated+", geo="+p.geolocationFilters.length+", traffic="+p.trafficFilters.length+") ---\n"+JSON.stringify(p,null,2)+"\n";});
+  }
+  out.textContent=txt;
+}
+async function loadAttackSessions(){
+  const el=document.getElementById("atk_sessions");if(!el)return;
+  try{
+    const d=await(await fetch("/ui/attack-sessions")).json();
+    const sess=d.sessions||[];
+    if(!sess.length){el.innerHTML='<span style="color:#888">No attack sessions yet. A Cyber Controller opens one via <code>_initiateAttackAnalysis</code> when an attack starts.</span>';return;}
+    el.innerHTML='<table><tr><th>UID</th><th>Networks</th><th>Mitigation</th><th>Mode</th><th>Polls</th><th>State</th><th></th></tr>'+
+      sess.map(s=>{
+        const st=s.closed?'<span class="badge off">closed</span>':'<span class="badge on">ongoing</span>';
+        const mode=s.progressive?'progressive':'static';
+        return `<tr>
+          <td><code title="${escapeHtml(s.uid)}">${escapeHtml(String(s.uid).slice(0,10))}\u2026</code></td>
+          <td>${escapeHtml((s.networks||[]).join(", "))}</td>
+          <td>${escapeHtml(s.definition_name||"(none - still learning)")}</td>
+          <td>${mode}</td>
+          <td>${s.poll_count||0}</td>
+          <td>${st}</td>
+          <td><button class="danger small" onclick="deleteAttackSession('${escapeHtml(s.uid)}')" title="Forget this session">&#128465;</button></td>
+        </tr>`;}).join("")+'</table>';
+  }catch(e){el.textContent="Could not load attack sessions.";}
+}
+async function deleteAttackSession(uid){
+  if(!confirm("Forget attack session "+uid.slice(0,10)+"\u2026?"))return;
+  const r=await fetch("/ui/attack-sessions/"+encodeURIComponent(uid),{method:"DELETE"});
+  if(r.ok){toast("Session removed");loadAttackSessions();}else{toast("Remove failed",false);}
+}
+
 /* ---------- Tab 4: scale test ---------- */
-function scaleModeChanged(){
-  const mode=document.getElementById("sc_mode").value;
+function scaleModeChanged(){  const mode=document.getElementById("sc_mode").value;
   const needsSrc=(mode==="src-seq"||mode==="src-rand");
   document.getElementById("sc_srcreq").textContent=needsSrc?"(required)":"";
   document.getElementById("sc_srchint").textContent=needsSrc

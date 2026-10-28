@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+goo#!/usr/bin/env python3
 """Pull the simulator's live runtime data (templates + configured CCs) from the
 running container on the VM into the local repo's data/ folder, so the exact
 state configured through the UI/API is captured in git.
@@ -17,7 +17,7 @@ from pathlib import Path
 import paramiko
 
 CONTAINER = "socx-sim"
-FILES = ["response_template.json", "configured_ccs.json"]
+FILES = ["response_template.json", "configured_ccs.json", "attack_mitigations.json"]
 MARKER = "__SOCX_FILE__"
 
 
