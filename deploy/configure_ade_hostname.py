@@ -26,11 +26,16 @@ PASS = "radware"
 PROPS_DIR = "/var/lib/docker/docker-root/volumes/config_anomaly-detection-engine-etc/_data"
 PROPS_FILE = f"{PROPS_DIR}/ade.config.properties"
 
-# The ADE container reaches the simulator over the shared 'vision' docker
-# network by container name (not the host IP, which is blocked by docker
-# network isolation). ADE always calls https://<value>/api/..., and the sim
-# serves TLS on 8080.
-SOCX_SIM = "socx-sim:8080"
+# IMPORTANT: the value must be a BARE host with NO port.
+# The ADE *remediation* web client (SocxRemediationWebClient) builds the URL as
+# host(<hostname>).port(443), i.e. it appends its own :443. If <hostname> already
+# contains a port (e.g. "10.205.102.81:8080") the result is the invalid
+# "https://10.205.102.81:8080:443" and ADE throws:
+#   java.lang.IllegalStateException: The port must be an integer: 8080:443
+# So we configure a port-less host and serve the simulator on 443 (see
+# docker-compose.yml "443:8080"). Both the positive and remediation clients then
+# produce a valid https URL on port 443.
+SOCX_SIM = "10.205.102.81"
 KEYS = {
     "socx.positive.cloud.hostname": SOCX_SIM,
     "socx.remediation.cloud.hostname": SOCX_SIM,
@@ -111,5 +116,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 

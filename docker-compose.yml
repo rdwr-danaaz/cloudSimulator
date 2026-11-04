@@ -4,7 +4,12 @@ services:
     image: socx-sim:latest
     container_name: socx-sim
     ports:
-      # host:container  -> change the left side to expose a different host port
+      # host:container  -> change the left side to expose a different host port.
+      # 443 is REQUIRED by the ADE *remediation* web client: it appends its own
+      # :443 to the configured cloud hostname, so that hostname must be a bare
+      # host (no port) and the simulator must answer on 443. Port 8080 is kept
+      # for the management UI and the peacetime/positive recommendation flow.
+      - "443:8080"
       - "8080:8080"
     environment:
       - PORT=8080
