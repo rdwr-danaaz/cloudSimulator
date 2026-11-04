@@ -835,9 +835,33 @@ def test_permanent_mitigation_pinned_network():
     assert m["isPartialMitigated"] is True
     dst = sorted(t["filterCriteria"]["dst_ip"] for t in m["trafficFilters"])
     assert dst == ["10.10.10.40", "10.10.10.41", "10.10.10.42"]
-    hashes = {t["filterHashCode"] for t in m["trafficFilters"]}
-    assert {-35134031, 1318175666, -1388443728} <= hashes
+    # Every filter carries a hash, and the three are distinct within the attack.
+    hashes = [t["filterHashCode"] for t in m["trafficFilters"]]
+    assert all(isinstance(h, int) for h in hashes)
+    assert len(set(hashes)) == 3
     assert m["geolocationFilters"][0]["countryName"] == "China"
+
+
+def test_filter_hashcodes_are_unique_per_attack():
+    """Each new attack must produce DIFFERENT filterHashCodes for the same
+    filters, so the CC activates them as new recommendations instead of treating
+    them as a previous (reverted) attack's filters. Within one attack the hashes
+    stay stable across polls."""
+    uid1 = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
+    a1 = client.get(GETMIT, params={"uid": uid1}).json()
+    a1_again = client.get(GETMIT, params={"uid": uid1}).json()
+    uid2 = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
+    a2 = client.get(GETMIT, params={"uid": uid2}).json()
+
+    def hashes(m):
+        return [f["filterHashCode"]
+                for key in ("asnFilters", "geolocationFilters", "trafficFilters")
+                for f in m[key]]
+
+    # Stable within the same attack across polls...
+    assert hashes(a1) == hashes(a1_again)
+    # ...but different between two separate attacks (no overlap).
+    assert not (set(hashes(a1)) & set(hashes(a2)))
 
 
 def test_permanent_mitigation_wins_over_user_catch_all():

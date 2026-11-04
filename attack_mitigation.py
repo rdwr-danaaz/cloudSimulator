@@ -225,13 +225,34 @@ def match_definition(networks: list[str]) -> dict[str, Any] | None:
         return json.loads(json.dumps(chosen)) if chosen else None
 
 
-def _enrich_filters(items: list[dict[str, Any]], *, applied: bool | None) -> list[dict[str, Any]]:
-    """Add a stable ``filterHashCode`` and (optionally) force ``applied`` on each
-    filter, returning fresh copies."""
+def _enrich_filters(
+    items: list[dict[str, Any]],
+    *,
+    applied: bool | None,
+    seed: str = "",
+) -> list[dict[str, Any]]:
+    """Add a ``filterHashCode`` and (optionally) force ``applied`` on each filter,
+    returning fresh copies.
+
+    When ``seed`` (the attack id) is given, the ``filterHashCode`` is derived from
+    the filter content PLUS the seed, so every attack session produces DISTINCT
+    hash codes for the same filter — even for the permanent mitigation whose
+    filters carry a preset ``filterHashCode``. This is required because the Cyber
+    Controller identifies remediation recommendations by ``filterHashCode``: if a
+    new attack reused a previous (now-reverted) attack's hash codes, the CC would
+    treat the filters as the already-removed old recommendations and never
+    re-activate them ("Not Active - remediation filters were reverted..."). The
+    hash stays stable across polls within the same attack (seed is constant per
+    session), preserving filter identity while the attack is ongoing.
+    """
     out: list[dict[str, Any]] = []
     for f in items:
         g = json.loads(json.dumps(f))
-        g.setdefault("filterHashCode", _filter_hash(f))
+        if seed:
+            base = {k: v for k, v in g.items() if k != "filterHashCode"}
+            g["filterHashCode"] = _filter_hash([seed, base])
+        else:
+            g.setdefault("filterHashCode", _filter_hash(f))
         if applied is not None:
             g["applied"] = applied
         else:
@@ -279,17 +300,17 @@ def build_mitigation_response(
             na = math.ceil(len(asn) * frac)
             ng = math.ceil(len(geo) * frac)
             nt = math.ceil(len(traffic) * frac)
-            asn_out = _enrich_filters(asn[:na], applied=True)
-            geo_out = _enrich_filters(geo[:ng], applied=True)
-            traffic_out = _enrich_filters(traffic[:nt], applied=True)
+            asn_out = _enrich_filters(asn[:na], applied=True, seed=attack_id)
+            geo_out = _enrich_filters(geo[:ng], applied=True, seed=attack_id)
+            traffic_out = _enrich_filters(traffic[:nt], applied=True, seed=attack_id)
             partial = (
                 (na < len(asn)) or (ng < len(geo)) or (nt < len(traffic))
                 or poll_count < 1
             )
         else:
-            asn_out = _enrich_filters(asn, applied=None)
-            geo_out = _enrich_filters(geo, applied=None)
-            traffic_out = _enrich_filters(traffic, applied=None)
+            asn_out = _enrich_filters(asn, applied=None, seed=attack_id)
+            geo_out = _enrich_filters(geo, applied=None, seed=attack_id)
+            traffic_out = _enrich_filters(traffic, applied=None, seed=attack_id)
             partial = bool(defn.get("isPartialMitigated", False))
     return {
         "accountId": account_id,
