@@ -19,7 +19,7 @@ Usage:
 import sys
 import paramiko
 
-HOST = "10.205.50.10"
+HOST = "10.205.50.20"
 USER = "root"
 PASS = "radware"
 
@@ -116,6 +116,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
 
 

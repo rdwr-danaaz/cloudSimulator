@@ -2,7 +2,7 @@ import paramiko
 
 c = paramiko.SSHClient()
 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect("10.205.50.10", username="root", password="radware", timeout=15)
+c.connect("10.205.50.20", username="root", password="radware", timeout=15)
 
 
 def run(cmd: str) -> None:

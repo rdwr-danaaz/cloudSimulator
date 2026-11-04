@@ -4,8 +4,10 @@ Tab 1 of the UI drives this module. Given a CC's SSH details and the address
 this simulator is reachable at, it:
 
   1. Points the ADE at the simulator by setting, in ``ade.config.properties``:
-        socx.positive.cloud.hostname    = <sim host:port>
-        socx.remediation.cloud.hostname = <sim host:port>
+        socx.positive.cloud.hostname    = <sim host>   (bare host, no port)
+        socx.remediation.cloud.hostname = <sim host>   (bare host, no port)
+     The ADE remediation client appends :443 itself, so the value must NOT
+     include a port and the simulator must answer on 443.
      (a timestamped backup is taken first).
   2. Imports the simulator's live TLS certificate into the ADE container's Java
      truststore (fixes 'PKIX path building failed').
@@ -34,6 +36,23 @@ _LOCK = threading.Lock()
 ADE_MATCH = "anomaly-detection-engine"
 ALIAS = "socx-sim"
 STOREPASS = "changeit"
+
+# The ADE *remediation* web client (SocxRemediationWebClient) always calls the
+# cloud over HTTPS on 443: it builds the URL as host(<hostname>).port(443), i.e.
+# it appends its own :443. Therefore the hostname we write into ade.config MUST
+# be a bare host with NO port — otherwise ADE produces an invalid URL like
+# "https://10.205.102.81:8080:443" and throws
+# "IllegalStateException: The port must be an integer: 8080:443".
+# The simulator is served on 443 (see docker-compose.yml "443:8080") so both the
+# positive client (uses the hostname as-is -> :443) and the remediation client
+# (appends :443) reach it.
+ADE_TLS_PORT = "443"
+
+
+def _bare_host(hostport: str) -> str:
+    """Return just the host part of a 'host' or 'host:port' value (no port)."""
+    return (hostport or "").strip().split(":")[0].strip()
+
 
 # keytool is a JVM tool and inherits JAVA_TOOL_OPTIONS from the ADE container.
 # Some ADEs set a JDWP remote-debug agent there (address=*:PORT); keytool then
@@ -272,9 +291,11 @@ def configure_cc(
         emit(f"  [ok] truststore: {cacerts}")
 
         # 3. Reachability: fetch the simulator's live cert FROM the CC. This proves
-        # the CC can reach the simulator before we touch its config.
-        sim_host = sim_hostport.split(":")[0]
-        sim_port = sim_hostport.split(":")[1] if ":" in sim_hostport else "8080"
+        # the CC can reach the simulator before we touch its config. ADE always
+        # talks to the simulator on 443 (the remediation client forces it), so we
+        # verify reachability and fetch the cert on 443.
+        sim_host = _bare_host(sim_hostport)
+        sim_port = ADE_TLS_PORT
         fetch = (
             f"echo | openssl s_client -connect {sim_host}:{sim_port} "
             f"-servername {sim_host} 2>/dev/null "
@@ -299,14 +320,14 @@ def configure_cc(
         ts = run("date +%Y%m%d_%H%M%S", echo=False)[1].strip()
         run(f"cp -p {props} {props}.bak_{ts}", echo=False)
         for key in ("socx.positive.cloud.hostname", "socx.remediation.cloud.hostname"):
-            line = f"{key} = {sim_hostport}"
+            line = f"{key} = {sim_host}"
             script = (
                 f"if grep -qE '^[[:space:]]*#?[[:space:]]*{key}[[:space:]]*=' {props}; then "
                 f"sed -i -E 's|^[[:space:]]*#?[[:space:]]*{key}[[:space:]]*=.*|{line}|' {props}; "
                 f"else printf '%s\\n' '{line}' >> {props}; fi"
             )
             rc, _ = run(script, echo=False)
-            emit(f"  set {key} -> {sim_hostport}  [{'ok' if rc == 0 else 'FAILED'}]")
+            emit(f"  set {key} -> {sim_host}  [{'ok' if rc == 0 else 'FAILED'}]")
 
         # 5. Import the simulator cert into the ADE truststore.
         run(f"docker cp /tmp/socx-sim.crt {ade}:/tmp/{ALIAS}.crt", echo=False)
@@ -336,7 +357,7 @@ def configure_cc(
         # 7. Post-verify: confirm config + cert are actually in place.
         set_ok = run(
             f"grep -cE 'socx\\.(positive|remediation)\\.cloud\\.hostname[[:space:]]*=[[:space:]]*"
-            f"{sim_hostport.replace('.', chr(92)+'.')}' {props}",
+            f"{sim_host.replace('.', chr(92)+'.')}[[:space:]]*$' {props}",
             echo=False,
         )[1].strip()
         alias_ok = run(
@@ -355,6 +376,7 @@ def configure_cc(
             "ssh_user": ssh_user,
             "ssh_port": ssh_port,
             "sim_hostport": sim_hostport,
+            "ade_hostname": sim_host,
             "ade_container": ade,
             "props_file": props,
             "orig_backup": orig_backup,
@@ -440,9 +462,9 @@ def preflight_cc(
                 )
         add("Java truststore found", bool(cacerts), cacerts or "cacerts not located")
 
-        # reachability to the simulator
-        sim_host = sim_hostport.split(":")[0]
-        sim_port = sim_hostport.split(":")[1] if ":" in sim_hostport else "8080"
+        # reachability to the simulator (ADE always uses 443)
+        sim_host = _bare_host(sim_hostport)
+        sim_port = ADE_TLS_PORT
         reach = out(
             f"echo | openssl s_client -connect {sim_host}:{sim_port} "
             f"-servername {sim_host} 2>/dev/null | openssl x509 -noout -subject 2>/dev/null "
@@ -534,7 +556,10 @@ def reset_cc(
             emit("WARNING: ade.config.properties not found; skipping config revert.")
         else:
             orig_backup = known.get("orig_backup") or f"{props}.socxsim-orig"
-            sim = (known.get("sim_hostport") or "").strip()
+            # The hostname we wrote is a bare host (no port). Prefer the recorded
+            # ade_hostname; fall back to the bare host of sim_hostport.
+            sim = (known.get("ade_hostname")
+                   or _bare_host(known.get("sim_hostport") or "")).strip()
             if run(f"test -f {orig_backup} && echo yes || echo no", echo=False)[1].strip() == "yes":
                 run(f"cp -p {orig_backup} {props}")
                 emit(f"Restored ADE config from backup {orig_backup}")

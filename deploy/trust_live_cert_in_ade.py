@@ -37,7 +37,7 @@ import paramiko
 # --------------------------------------------------------------------------- #
 # Defaults (override on the command line)
 # --------------------------------------------------------------------------- #
-ADE_HOST = "10.205.50.10"      # Cyber Controller running the ADE container
+ADE_HOST = "10.205.50.20"      # Cyber Controller running the ADE container
 ADE_USER = "root"
 ADE_PASS = "radware"
 
@@ -180,4 +180,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
