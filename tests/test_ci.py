@@ -602,11 +602,12 @@ def test_configure_without_address_uses_host_header():
 # Attack-time remediation flow (Remediation Recommendations tab)
 # --------------------------------------------------------------------------- #
 import attack_mitigation
-from cloud_mock_server import attack_sessions
+from cloud_mock_server import attack_sessions, FULLY_MITIGATED_POLLS
 
 INIT = "/api/sdcc/genai/core/analysis/attack/_initiateAttackAnalysis"
 GETMIT = "/api/sdcc/genai/core/analysis/attack/_getMitigation"
 CLOSE = "/api/sdcc/genai/core/analysis/attack/_closeAttack"
+END = "/ui/attack-sessions/{uid}/end"
 
 
 @pytest.fixture(autouse=True)
@@ -717,6 +718,27 @@ def test_attack_initiate_rejects_bad_network():
 
 def test_getmitigation_unknown_uid_fails():
     assert client.get(GETMIT, params={"uid": "deadbeef"}).status_code == 500
+
+
+def test_attack_winddown_sends_fully_mitigated_then_closes():
+    """After an attack is ended, the cloud returns Fully Mitigated (empty filters,
+    isPartialMitigated=false) for FULLY_MITIGATED_POLLS polls, then the session
+    auto-closes — matching the real close-attack sequence."""
+    _add_mitigation(networks=["2.1.5.0/24"])
+    uid = client.post(INIT, json={"networks": ["2.1.5.0/24"]}).json()["uid"]
+    # Active phase: filters present.
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert len(m["trafficFilters"]) >= 1
+    # Operator ends the attack -> wind-down begins.
+    r = client.post(END.format(uid=uid))
+    assert r.status_code == 200 and r.json()["winddown"] is True
+    # The next FULLY_MITIGATED_POLLS polls are Fully Mitigated (empty, not partial).
+    for _ in range(FULLY_MITIGATED_POLLS):
+        fm = client.get(GETMIT, params={"uid": uid}).json()
+        assert fm["isPartialMitigated"] is False
+        assert fm["trafficFilters"] == [] and fm["geolocationFilters"] == [] and fm["asnFilters"] == []
+    # One more poll and the attack is closed (session gone).
+    assert client.get(GETMIT, params={"uid": uid}).status_code == 500
 
 
 def test_close_attack_reports_succeed_and_is_idempotent():
@@ -871,4 +893,3 @@ def test_permanent_mitigation_wins_over_user_catch_all():
     uid = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
     m = client.get(GETMIT, params={"uid": uid}).json()
     assert len(m["trafficFilters"]) == 3  # permanent, not the catch-all's 1
-

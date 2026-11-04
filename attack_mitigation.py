@@ -326,3 +326,34 @@ def build_mitigation_response(
         "attackId": attack_id,
     }
 
+
+def build_fully_mitigated_response(
+    *,
+    account_id: str,
+    attack_id: str,
+    start_ts: str,
+    now_ts: str,
+) -> dict[str, Any]:
+    """The "fully mitigated" response the real cloud returns as an attack winds
+    down: ``isPartialMitigated=false`` with empty asn/geo/traffic filter lists.
+
+    The Cyber Controller treats a sustained run of these (≈2.5 min / ~10 polls in
+    the reference log) as the signal that the attack is over, and only then calls
+    ``_closeAttack``. Returning it for a few cycles before the session closes
+    reproduces that real close-attack sequence.
+    """
+    return {
+        "accountId": account_id,
+        "asnFilters": [],
+        "geolocationFilters": [],
+        "trafficFilters": [],
+        "isPartialMitigated": False,
+        "id": 0,
+        "type": "MITIGATION",
+        "updated": False,
+        "endTimestamp": now_ts,
+        "startTimestamp": start_ts,
+        "attackId": attack_id,
+    }
+
+

@@ -31,6 +31,12 @@ app = FastAPI(
 
 _ACCOUNT_ID = "67d6a0d9c39077bed7e1f23e"
 
+# When an attack is ended, the cloud keeps returning "fully mitigated" (empty
+# filters, isPartialMitigated=false) responses for this many _getMitigation polls
+# before the session auto-closes — reproducing the reference log where ~10 polls
+# (≈2.5 min at a 15s poll interval) of Fully Mitigated precede the actual close.
+FULLY_MITIGATED_POLLS = 10
+
 # Per-Cyber-Controller recommendation sets, keyed by the CC's PRIMARY IP.
 # One set per CC (regenerating replaces it). Each set is bound to a single
 # destination network and may also list a SECONDARY CC IP for HA (primary +
@@ -358,6 +364,7 @@ def initiate_attack(request: InitiateAttackRequest, http: Request) -> dict[str, 
         "start_ts": now,
         "started_at": _iso_now(),
         "updated_at": _iso_now(),
+        "winddown_from_poll": None,
         "closed": False,
         "closed_at": None,
     }
@@ -374,6 +381,28 @@ def get_mitigation(uid: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"No active attack session for uid '{uid}'")
     session["poll_count"] = int(session.get("poll_count", 0)) + 1
     session["updated_at"] = _iso_now()
+
+    # Wind-down: once the attack has been ended, keep returning "fully mitigated"
+    # (empty filters) for FULLY_MITIGATED_POLLS polls, then auto-close the session
+    # — reproducing the real cloud's close-attack sequence (~2.5 min of Fully
+    # Mitigated before the attack is closed).
+    wd = session.get("winddown_from_poll")
+    if wd is not None:
+        fm_served = int(session["poll_count"]) - int(wd)
+        if fm_served > FULLY_MITIGATED_POLLS:
+            session["closed"] = True
+            session["closed_at"] = _iso_now()
+            raise HTTPException(
+                status_code=500,
+                detail=f"No active attack session for uid '{uid}'",
+            )
+        return attack_mitigation.build_fully_mitigated_response(
+            account_id=session["account_id"],
+            attack_id=uid,
+            start_ts=session["started_at"],
+            now_ts=_iso_now(),
+        )
+
     defn = (attack_mitigation.get_mitigation(session["definition_id"])
             if session.get("definition_id") else None)
     # Re-match if the originally matched definition was deleted mid-attack.
@@ -469,6 +498,14 @@ def list_attack_sessions() -> dict[str, Any]:
     """List live/closed attack sessions (summaries) for the UI."""
     out = []
     for s in attack_sessions.values():
+        wd = s.get("winddown_from_poll")
+        if s.get("closed"):
+            state = "closed"
+        elif wd is not None:
+            served = max(0, int(s.get("poll_count", 0)) - int(wd))
+            state = f"winding down ({min(served, FULLY_MITIGATED_POLLS)}/{FULLY_MITIGATED_POLLS})"
+        else:
+            state = "ongoing"
         out.append({
             "uid": s["uid"],
             "networks": s["networks"],
@@ -478,12 +515,35 @@ def list_attack_sessions() -> dict[str, Any]:
             "mitigation_suggestions_only": s.get("mitigation_suggestions_only"),
             "started_at": s.get("started_at"),
             "updated_at": s.get("updated_at"),
+            "winddown": wd is not None,
+            "state": state,
             "closed": s.get("closed"),
             "closed_at": s.get("closed_at"),
         })
     # Most recently updated first.
     out.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     return {"sessions": out}
+
+
+@app.post("/ui/attack-sessions/{uid}/end")
+def end_attack_session(uid: str) -> dict[str, Any]:
+    """Begin the realistic close-attack wind-down for a live session.
+
+    From the next poll on, _getMitigation returns "fully mitigated" (empty
+    filters) for FULLY_MITIGATED_POLLS polls, then the session auto-closes — so
+    the Cyber Controller sees the same Fully-Mitigated-then-close sequence the
+    real cloud produces. No-op if the session is already closed or winding down.
+    """
+    session = attack_sessions.get(uid)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No attack session '{uid}'")
+    if session.get("closed"):
+        return {"uid": uid, "state": "closed", "winddown": False}
+    if session.get("winddown_from_poll") is None:
+        session["winddown_from_poll"] = int(session.get("poll_count", 0))
+        session["updated_at"] = _iso_now()
+    return {"uid": uid, "state": "winding down", "winddown": True,
+            "fully_mitigated_polls": FULLY_MITIGATED_POLLS}
 
 
 @app.delete("/ui/attack-sessions/{uid}")

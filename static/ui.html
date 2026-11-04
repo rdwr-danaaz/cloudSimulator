@@ -896,8 +896,13 @@ async function loadAttackSessions(){
     if(!sess.length){el.innerHTML='<span style="color:#888">No attack sessions yet. A Cyber Controller opens one via <code>_initiateAttackAnalysis</code> when an attack starts.</span>';return;}
     el.innerHTML='<table><tr><th>UID</th><th>Networks</th><th>Mitigation</th><th>Mode</th><th>Polls</th><th>State</th><th></th></tr>'+
       sess.map(s=>{
-        const st=s.closed?'<span class="badge off">closed</span>':'<span class="badge on">ongoing</span>';
+        const state=s.state||(s.closed?'closed':'ongoing');
+        const badge=s.closed?'badge off':(s.winddown?'badge':'badge on');
+        const st='<span class="'+badge+'">'+escapeHtml(state)+'</span>';
         const mode=s.progressive?'progressive':'static';
+        const endBtn=(!s.closed && !s.winddown)
+          ? `<button class="sec small" onclick="endAttackSession('${escapeHtml(s.uid)}')" title="Simulate the attack ending: the cloud sends Fully Mitigated for ~10 polls (2.5 min), then closes">&#9209; End attack</button> `
+          : '';
         return `<tr>
           <td><code title="${escapeHtml(s.uid)}">${escapeHtml(String(s.uid).slice(0,10))}\u2026</code></td>
           <td>${escapeHtml((s.networks||[]).join(", "))}</td>
@@ -905,9 +910,15 @@ async function loadAttackSessions(){
           <td>${mode}</td>
           <td>${s.poll_count||0}</td>
           <td>${st}</td>
-          <td><button class="danger small" onclick="deleteAttackSession('${escapeHtml(s.uid)}')" title="Forget this session">&#128465;</button></td>
+          <td style="white-space:nowrap">${endBtn}<button class="danger small" onclick="deleteAttackSession('${escapeHtml(s.uid)}')" title="Forget this session">&#128465;</button></td>
         </tr>`;}).join("")+'</table>';
   }catch(e){el.textContent="Could not load attack sessions.";}
+}
+async function endAttackSession(uid){
+  if(!confirm("End attack "+uid.slice(0,10)+"\u2026?\n\nThe cloud will send Fully Mitigated responses for ~10 polls (about 2.5 min at a 15s poll interval), then the attack closes."))return;
+  const r=await fetch("/ui/attack-sessions/"+encodeURIComponent(uid)+"/end",{method:"POST"});
+  if(r.ok){toast("Attack ending - sending Fully Mitigated, then closing");loadAttackSessions();}
+  else{toast("Could not end attack",false);}
 }
 async function deleteAttackSession(uid){
   if(!confirm("Forget attack session "+uid.slice(0,10)+"\u2026?"))return;
