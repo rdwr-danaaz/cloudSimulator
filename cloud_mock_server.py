@@ -394,13 +394,19 @@ def get_mitigation(uid: str) -> dict[str, Any]:
 
 @app.post("/api/sdcc/genai/core/analysis/attack/_closeAttack")
 def close_attack(uid: str) -> dict[str, Any]:
-    """Close an attack session once the attack has ended."""
+    """Close an attack session once the attack has ended.
+
+    The ADE deserializes this into an ``AttackTerminationResponse`` whose boolean
+    field ``succeed`` must be true, otherwise it logs "Attack was not closed on
+    cloud". We therefore return ``{"succeed": true}`` (plus a few harmless extras
+    for the UI/debugging). Closing an already-closed or unknown uid still reports
+    success so the CC can finish its termination cleanly (idempotent close).
+    """
     session = attack_sessions.get(uid)
-    if session is None:
-        raise HTTPException(status_code=500, detail=f"No attack session for uid '{uid}'")
-    session["closed"] = True
-    session["closed_at"] = _iso_now()
-    return {"uid": uid, "closed": True}
+    if session is not None:
+        session["closed"] = True
+        session["closed_at"] = _iso_now()
+    return {"succeed": True, "uid": uid, "closed": True}
 
 
 # --- Remediation Recommendations tab: manage attack-mitigation definitions ---

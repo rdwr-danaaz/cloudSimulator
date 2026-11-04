@@ -657,6 +657,9 @@ def test_attack_lifecycle_static():
         assert "filterHashCode" in m["trafficFilters"][0]
     c = client.post(CLOSE, params={"uid": uid})
     assert c.status_code == 200 and c.json()["closed"] is True
+    # ADE requires the boolean 'succeed' field to be true, else it logs
+    # "Attack was not closed on cloud".
+    assert c.json()["succeed"] is True
     assert client.get(GETMIT, params={"uid": uid}).status_code == 500
 
 
@@ -714,6 +717,21 @@ def test_attack_initiate_rejects_bad_network():
 
 def test_getmitigation_unknown_uid_fails():
     assert client.get(GETMIT, params={"uid": "deadbeef"}).status_code == 500
+
+
+def test_close_attack_reports_succeed_and_is_idempotent():
+    """_closeAttack must return succeed:true (ADE's AttackTerminationResponse),
+    and closing an unknown/already-closed uid must still report success."""
+    _add_mitigation(networks=["2.1.5.0/24"])
+    uid = client.post(INIT, json={"networks": ["2.1.5.0/24"]}).json()["uid"]
+    first = client.post(CLOSE, params={"uid": uid})
+    assert first.status_code == 200 and first.json()["succeed"] is True
+    # Second close of the same (now closed) uid still succeeds.
+    again = client.post(CLOSE, params={"uid": uid})
+    assert again.status_code == 200 and again.json()["succeed"] is True
+    # Unknown uid also reports success (idempotent close).
+    unknown = client.post(CLOSE, params={"uid": "deadbeef"})
+    assert unknown.status_code == 200 and unknown.json()["succeed"] is True
 
 
 def test_attack_mitigation_crud_and_preview():
@@ -829,3 +847,4 @@ def test_permanent_mitigation_wins_over_user_catch_all():
     uid = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
     m = client.get(GETMIT, params={"uid": uid}).json()
     assert len(m["trafficFilters"]) == 3  # permanent, not the catch-all's 1
+
