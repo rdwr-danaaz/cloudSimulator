@@ -290,8 +290,8 @@ th{color:#1a3c5e}
       <button class="sec small" onclick="addTrafficFilter()" title="Append this traffic filter">&#10133; Add traffic filter</button>
 
       <label style="margin-top:18px">Filters (JSON) &mdash; edit directly if you prefer</label>
-      <textarea id="atk_json" rows="12">{"geolocationFilters":[],"trafficFilters":[]}</textarea>
-      <p class="hint">A JSON object with <code>geolocationFilters</code> and <code>trafficFilters</code> arrays. <code>filterHashCode</code> is generated automatically.</p>
+      <textarea id="atk_json" rows="12">{"asnFilters":[],"geolocationFilters":[],"trafficFilters":[]}</textarea>
+      <p class="hint">A JSON object with <code>asnFilters</code>, <code>geolocationFilters</code> and <code>trafficFilters</code> arrays. <code>filterHashCode</code> is generated automatically.</p>
       <button onclick="saveMitigation()" title="Persist this attack-mitigation definition">&#128190; Save mitigation</button>
       <button class="sec" onclick="cancelMitEdit()" title="Discard changes and close the editor">Cancel</button>
       <button class="sec" onclick="previewMitigation()" title="See the static response and the per-poll progressive sequence">&#9654; Preview polls</button>
@@ -750,8 +750,8 @@ document.getElementById("jsonmodal").addEventListener("click",e=>{if(e.target.id
 /* ---------- Tab 3b: remediation recommendations (attack-time) ---------- */
 let MITIGATIONS = [];
 let MIT_EDIT_ID = null;
-function atkFilters(){const raw=document.getElementById("atk_json").value.trim();const o=raw?JSON.parse(raw):{};return {geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]};}
-function setAtkFilters(o){document.getElementById("atk_json").value=JSON.stringify({geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]},null,2);}
+function atkFilters(){const raw=document.getElementById("atk_json").value.trim();const o=raw?JSON.parse(raw):{};return {asnFilters:o.asnFilters||[],geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]};}
+function setAtkFilters(o){document.getElementById("atk_json").value=JSON.stringify({asnFilters:o.asnFilters||[],geolocationFilters:o.geolocationFilters||[],trafficFilters:o.trafficFilters||[]},null,2);}
 function renderAtkBadge(){const on=document.getElementById("atk_enabled").checked;const b=document.getElementById("atk_badge");b.textContent=on?"active":"inactive";b.className="badge "+(on?"on":"off");}
 function atkProgChanged(){const on=document.getElementById("atk_progressive").checked;document.getElementById("atk_pollswrap").style.display=on?"block":"none";}
 async function loadMitigations(){
@@ -760,7 +760,7 @@ async function loadMitigations(){
     const d=await(await fetch("/ui/attack-mitigations")).json();
     MITIGATIONS=d.mitigations||[];
     if(!MITIGATIONS.length){el.innerHTML='<span style="color:#888">No attack-mitigation definitions yet. Click <b>New mitigation</b> to create one.</span>';return;}
-    el.innerHTML='<table><tr><th>Name</th><th>Networks</th><th>Geo</th><th>Traffic</th><th>Mode</th><th>Status</th><th></th></tr>'+
+    el.innerHTML='<table><tr><th>Name</th><th>Networks</th><th>ASN</th><th>Geo</th><th>Traffic</th><th>Mode</th><th>Status</th><th></th></tr>'+
       MITIGATIONS.map(m=>{
         const nets=(m.networks&&m.networks.length)?escapeHtml(m.networks.join(", ")):'<span style="opacity:.6">any attack</span>';
         const mode=m.progressive?('progressive ('+(m.progressivePolls||3)+' polls)'):'static';
@@ -768,6 +768,7 @@ async function loadMitigations(){
         return `<tr>
           <td><b>${escapeHtml(m.name||"Mitigation")}</b></td>
           <td>${nets}</td>
+          <td>${(m.asnFilters||[]).length}</td>
           <td>${(m.geolocationFilters||[]).length}</td>
           <td>${(m.trafficFilters||[]).length}</td>
           <td>${escapeHtml(mode)}</td>
@@ -800,12 +801,28 @@ function cancelMitEdit(){document.getElementById("atk_editor").style.display="no
 function addGeoFilter(){
   const country=document.getElementById("g_country").value.trim();
   if(!country){toast("Country code is required",false);return;}
+  const cname=document.getElementById("g_cname").value.trim();
   const pct=parseInt(document.getElementById("g_pct").value);
   let o;try{o=atkFilters();}catch(e){toast("Filters JSON invalid: "+e.message,false);return;}
-  o.geolocationFilters.push({country,attackBlockagePercentage:isNaN(pct)?0:pct,applied:true});
+  const g={country,attackBlockagePercentage:isNaN(pct)?0:pct,applied:true};
+  if(cname)g.countryName=cname;
+  o.geolocationFilters.push(g);
   setAtkFilters(o);
-  document.getElementById("g_country").value="";document.getElementById("g_pct").value="";
+  document.getElementById("g_country").value="";document.getElementById("g_cname").value="";document.getElementById("g_pct").value="";
   toast("Geo filter added (remember to Save)");
+}
+function addAsnFilter(){
+  const asn=document.getElementById("a_asn").value.trim();
+  if(!asn){toast("ASN is required",false);return;}
+  const org=document.getElementById("a_org").value.trim();
+  const bps=parseInt(document.getElementById("a_bps").value),pps=parseInt(document.getElementById("a_pps").value);
+  let o;try{o=atkFilters();}catch(e){toast("Filters JSON invalid: "+e.message,false);return;}
+  const a={asn,attackBlockagePercentage:{bps:isNaN(bps)?0:bps,pps:isNaN(pps)?0:pps},applied:true};
+  if(org)a.organization=org;
+  o.asnFilters.push(a);
+  setAtkFilters(o);
+  ["a_asn","a_org","a_bps","a_pps"].forEach(id=>document.getElementById(id).value="");
+  toast("ASN filter added (remember to Save)");
 }
 function addTrafficFilter(){
   const g=id=>document.getElementById(id).value.trim();
@@ -832,13 +849,14 @@ function mitBody(){
     isPartialMitigated:document.getElementById("atk_partial").checked,
     progressive:document.getElementById("atk_progressive").checked,
     progressivePolls:parseInt(document.getElementById("atk_polls").value)||3,
+    asnFilters:o.asnFilters,
     geolocationFilters:o.geolocationFilters,
     trafficFilters:o.trafficFilters
   };
 }
 async function saveMitigation(){
   const body=mitBody();if(!body)return;
-  if(!body.geolocationFilters.length && !body.trafficFilters.length){toast("Add at least one geo or traffic filter",false);return;}
+  if(!body.asnFilters.length && !body.geolocationFilters.length && !body.trafficFilters.length){toast("Add at least one ASN, geo or traffic filter",false);return;}
   const url=MIT_EDIT_ID?("/ui/attack-mitigations/"+encodeURIComponent(MIT_EDIT_ID)):"/ui/attack-mitigations";
   const method=MIT_EDIT_ID?"PUT":"POST";
   const r=await fetch(url,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -866,7 +884,7 @@ async function previewMitigation(){
   let txt="STATIC (every poll returns this):\n"+JSON.stringify(d.static,null,2);
   if(d.progressive&&d.progressive.length){
     txt+="\n\nPROGRESSIVE sequence (one entry per poll):\n";
-    d.progressive.forEach((p,i)=>{txt+="\n--- poll "+(i+1)+" (isPartialMitigated="+p.isPartialMitigated+", geo="+p.geolocationFilters.length+", traffic="+p.trafficFilters.length+") ---\n"+JSON.stringify(p,null,2)+"\n";});
+    d.progressive.forEach((p,i)=>{txt+="\n--- poll "+(i+1)+" (isPartialMitigated="+p.isPartialMitigated+", asn="+(p.asnFilters||[]).length+", geo="+p.geolocationFilters.length+", traffic="+p.trafficFilters.length+") ---\n"+JSON.stringify(p,null,2)+"\n";});
   }
   out.textContent=txt;
 }

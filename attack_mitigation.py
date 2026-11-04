@@ -34,6 +34,8 @@ import uuid
 from typing import Any
 from pathlib import Path
 
+import permanent_mitigations
+
 _DATA_DIR = Path(__file__).parent / "data"
 _FILE = _DATA_DIR / "attack_mitigations.json"
 _LOCK = threading.RLock()
@@ -63,6 +65,9 @@ def _coerce(raw: dict[str, Any], fallback_id: str | None = None) -> dict[str, An
     if not isinstance(networks, list):
         networks = []
     networks = [str(n).strip() for n in networks if str(n).strip()]
+    asn = raw.get("asnFilters")
+    if not isinstance(asn, list):
+        asn = []
     geo = raw.get("geolocationFilters")
     if not isinstance(geo, list):
         geo = []
@@ -83,6 +88,7 @@ def _coerce(raw: dict[str, Any], fallback_id: str | None = None) -> dict[str, An
         "isPartialMitigated": bool(raw.get("isPartialMitigated", False)),
         "progressive": bool(raw.get("progressive", False)),
         "progressivePolls": polls,
+        "asnFilters": [a for a in asn if isinstance(a, dict)],
         "geolocationFilters": [g for g in geo if isinstance(g, dict)],
         "trafficFilters": [t for t in traffic if isinstance(t, dict)],
     }
@@ -145,12 +151,13 @@ def get_mitigation(def_id: str) -> dict[str, Any] | None:
 def _validate(data: dict[str, Any]) -> None:
     if not isinstance(data, dict):
         raise ValueError("mitigation must be a JSON object")
+    asn = data.get("asnFilters") or []
     geo = data.get("geolocationFilters") or []
     traffic = data.get("trafficFilters") or []
-    if not isinstance(geo, list) or not isinstance(traffic, list):
-        raise ValueError("geolocationFilters and trafficFilters must be lists")
-    if not geo and not traffic:
-        raise ValueError("a mitigation needs at least one geolocation or traffic filter")
+    if not isinstance(asn, list) or not isinstance(geo, list) or not isinstance(traffic, list):
+        raise ValueError("asnFilters, geolocationFilters and trafficFilters must be lists")
+    if not asn and not geo and not traffic:
+        raise ValueError("a mitigation needs at least one ASN, geolocation or traffic filter")
 
 
 def add_mitigation(data: dict[str, Any]) -> dict[str, Any]:
@@ -196,9 +203,13 @@ def delete_mitigation(def_id: str) -> bool:
 def match_definition(networks: list[str]) -> dict[str, Any] | None:
     """Return the enabled definition that applies to an attack on ``networks``.
 
-    An exact network match wins over a catch-all (empty ``networks``) definition.
-    Returns a deep copy, or None when nothing matches.
+    Priority: a permanent (always-on) mitigation pinned to a network wins over
+    everything; then an exact user-defined network match; then a catch-all
+    (empty ``networks``) user definition. Returns a deep copy, or None.
     """
+    pinned = permanent_mitigations.permanent_mitigation_for(networks)
+    if pinned is not None:
+        return _coerce(pinned, fallback_id=pinned.get("id"))
     with _LOCK:
         exact: dict[str, Any] | None = None
         catch_all: dict[str, Any] | None = None
@@ -236,8 +247,8 @@ def build_mitigation_response(
     progressive: bool,
     account_id: str,
     attack_id: str,
-    start_ts: int,
-    now_ts: int,
+    start_ts: str,
+    now_ts: str,
 ) -> dict[str, Any]:
     """Build a ``_getMitigation`` response body from a matched definition.
 
@@ -249,35 +260,47 @@ def build_mitigation_response(
       ``false`` (fully mitigated).
 
     When no definition matches, an empty, still-learning mitigation is returned.
+
+    ``start_ts`` / ``now_ts`` are ISO-8601 ``Z`` strings (the real cloud
+    contract uses ISO timestamps for ``startTimestamp`` / ``endTimestamp``).
     """
     if defn is None:
+        asn_out: list[dict[str, Any]] = []
         geo_out: list[dict[str, Any]] = []
         traffic_out: list[dict[str, Any]] = []
         partial = True
     else:
+        asn = defn.get("asnFilters", [])
         geo = defn.get("geolocationFilters", [])
         traffic = defn.get("trafficFilters", [])
         if progressive:
             stages = max(1, int(defn.get("progressivePolls") or 3))
             frac = min(1.0, max(0, poll_count) / stages)
+            na = math.ceil(len(asn) * frac)
             ng = math.ceil(len(geo) * frac)
             nt = math.ceil(len(traffic) * frac)
+            asn_out = _enrich_filters(asn[:na], applied=True)
             geo_out = _enrich_filters(geo[:ng], applied=True)
             traffic_out = _enrich_filters(traffic[:nt], applied=True)
-            partial = (ng < len(geo)) or (nt < len(traffic)) or poll_count < 1
+            partial = (
+                (na < len(asn)) or (ng < len(geo)) or (nt < len(traffic))
+                or poll_count < 1
+            )
         else:
+            asn_out = _enrich_filters(asn, applied=None)
             geo_out = _enrich_filters(geo, applied=None)
             traffic_out = _enrich_filters(traffic, applied=None)
             partial = bool(defn.get("isPartialMitigated", False))
     return {
         "accountId": account_id,
+        "asnFilters": asn_out,
         "geolocationFilters": geo_out,
         "trafficFilters": traffic_out,
         "isPartialMitigated": partial,
-        "id": uuid.uuid4().hex,
+        "id": 0,
         "type": "MITIGATION",
-        "updated": now_ts,
-        "endTimestamp": 0,
+        "updated": False,
+        "endTimestamp": now_ts,
         "startTimestamp": start_ts,
         "attackId": attack_id,
     }

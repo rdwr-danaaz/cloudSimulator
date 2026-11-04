@@ -629,6 +629,7 @@ def _add_mitigation(**over):
         "isPartialMitigated": over.get("isPartialMitigated", False),
         "progressive": over.get("progressive", False),
         "progressivePolls": over.get("progressivePolls", 3),
+        "asnFilters": over.get("asnFilters", []),
         "geolocationFilters": over.get("geolocationFilters",
                                        [{"country": "CN", "attackBlockagePercentage": 80}]),
         "trafficFilters": over.get("trafficFilters", [
@@ -749,4 +750,82 @@ def test_attack_sessions_listing_and_delete():
     assert client.delete(f"/ui/attack-sessions/{uid}").status_code == 200
 
 
+# --------------------------------------------------------------------------- #
+# Cloud contract alignment: asnFilters, countryName and the response envelope
+# --------------------------------------------------------------------------- #
+def test_mitigation_response_envelope_types():
+    """id is int 0, updated is bool false, timestamps are ISO-8601 Z strings."""
+    _add_mitigation(networks=["2.1.5.0/24"])
+    uid = client.post(INIT, json={"networks": ["2.1.5.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert m["id"] == 0 and isinstance(m["id"], int)
+    assert m["updated"] is False
+    assert isinstance(m["startTimestamp"], str) and m["startTimestamp"].endswith("Z")
+    assert isinstance(m["endTimestamp"], str) and m["endTimestamp"].endswith("Z")
+    assert "asnFilters" in m
 
+
+def test_mitigation_asn_and_country_name_round_trip():
+    _add_mitigation(
+        networks=["4.4.4.0/24"],
+        asnFilters=[{"asn": "7018", "organization": "AT&T",
+                     "attackBlockagePercentage": {"bps": 10, "pps": 3}}],
+        geolocationFilters=[{"country": "CN", "countryName": "China",
+                             "attackBlockagePercentage": 80}],
+    )
+    uid = client.post(INIT, json={"networks": ["4.4.4.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert len(m["asnFilters"]) == 1
+    asn = m["asnFilters"][0]
+    assert asn["asn"] == "7018" and asn["organization"] == "AT&T"
+    assert "filterHashCode" in asn
+    assert m["geolocationFilters"][0]["countryName"] == "China"
+
+
+def test_mitigation_asn_only_definition_is_valid():
+    body = {
+        "name": "asn only", "networks": ["5.5.5.0/24"],
+        "asnFilters": [{"asn": "64500", "attackBlockagePercentage": {"bps": 5, "pps": 2}}],
+        "geolocationFilters": [], "trafficFilters": [],
+    }
+    assert client.post("/ui/attack-mitigations", json=body).status_code == 201
+
+
+def test_progressive_reveals_asn_filters_too():
+    _add_mitigation(
+        networks=["6.6.6.0/24"], progressive=True, progressivePolls=3,
+        asnFilters=[{"asn": "1"}, {"asn": "2"}, {"asn": "3"}],
+        geolocationFilters=[], trafficFilters=[],
+    )
+    uid = client.post(INIT, json={"networks": ["6.6.6.0/24"]}).json()["uid"]
+    counts = [len(client.get(GETMIT, params={"uid": uid}).json()["asnFilters"])
+              for _ in range(3)]
+    assert counts == [1, 2, 3]
+
+
+# --------------------------------------------------------------------------- #
+# Permanent (always-on) attack mitigation pinned to 10.10.10.0/24
+# --------------------------------------------------------------------------- #
+def test_permanent_mitigation_pinned_network():
+    """10.10.10.0/24 always returns the pinned mitigation from the cloud example,
+    even with no user-created definitions."""
+    uid = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert len(m["asnFilters"]) == 6
+    assert len(m["geolocationFilters"]) == 5
+    assert len(m["trafficFilters"]) == 3
+    assert m["isPartialMitigated"] is True
+    dst = sorted(t["filterCriteria"]["dst_ip"] for t in m["trafficFilters"])
+    assert dst == ["10.10.10.40", "10.10.10.41", "10.10.10.42"]
+    hashes = {t["filterHashCode"] for t in m["trafficFilters"]}
+    assert {-35134031, 1318175666, -1388443728} <= hashes
+    assert m["geolocationFilters"][0]["countryName"] == "China"
+
+
+def test_permanent_mitigation_wins_over_user_catch_all():
+    _add_mitigation(name="catch-all", networks=[],
+                    trafficFilters=[{"priority": 9, "filterMode": "ALLOW",
+                                     "filterCriteria": {"dst_ip": "0.0.0.0/0"}}])
+    uid = client.post(INIT, json={"networks": ["10.10.10.0/24"]}).json()["uid"]
+    m = client.get(GETMIT, params={"uid": uid}).json()
+    assert len(m["trafficFilters"]) == 3  # permanent, not the catch-all's 1

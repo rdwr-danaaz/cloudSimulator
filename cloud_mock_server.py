@@ -187,6 +187,7 @@ class AttackMitigationUpsertRequest(BaseModel):
     isPartialMitigated: bool = False
     progressive: bool = False
     progressivePolls: int = 3
+    asnFilters: list[dict[str, Any]] = Field(default_factory=list)
     geolocationFilters: list[dict[str, Any]] = Field(default_factory=list)
     trafficFilters: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -386,8 +387,8 @@ def get_mitigation(uid: str) -> dict[str, Any]:
         progressive=bool(session.get("progressive")),
         account_id=session["account_id"],
         attack_id=uid,
-        start_ts=session["start_ts"],
-        now_ts=_epoch_ms(),
+        start_ts=session["started_at"],
+        now_ts=_iso_now(),
     )
 
 
@@ -442,7 +443,7 @@ def preview_attack_mitigation(body: AttackMitigationUpsertRequest) -> dict[str, 
     Shows the static response and, when ``progressive`` is set, the sequence of
     responses a CC would receive on successive _getMitigation polls."""
     defn = attack_mitigation._coerce(body.model_dump())
-    start_ts = _epoch_ms()
+    start_ts = _iso_now()
     static = attack_mitigation.build_mitigation_response(
         defn, poll_count=1, progressive=False,
         account_id=_ACCOUNT_ID, attack_id="preview", start_ts=start_ts, now_ts=start_ts)
